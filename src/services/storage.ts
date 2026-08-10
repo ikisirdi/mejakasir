@@ -1,4 +1,4 @@
-import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord } from '../types';
+import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord } from '../types';
 import { INITIAL_CASE_RECORDS } from '../data/initialData';
 
 const STORAGE_KEYS = {
@@ -8,10 +8,12 @@ const STORAGE_KEYS = {
   CACHE_META: 'pa_perkara_cache_meta_v2',
   BIAYA_PROSES: 'pa_perkara_biaya_proses_v2',
   JURNAL_SKUM: 'pa_perkara_jurnal_skum_v1',
+  PINJAMAN_SKUM: 'pa_perkara_pinjaman_skum_v1',
 };
 
 export const INITIAL_BIAYA_PROSES_RECORDS: BiayaProsesRecord[] = [];
 export const INITIAL_JURNAL_SKUM_RECORDS: JurnalBiayaSkumRecord[] = [];
+export const INITIAL_PINJAMAN_SKUM_RECORDS: PinjamanSkumRecord[] = [];
 
 export const TARGET_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx_N2FEFTTruxZzyR5BzVRted8jpgE-qTSABwivhx0_s7v8aDR1VIpIsxhlABbY6jQs/exec';
 
@@ -159,6 +161,7 @@ export class StorageService {
       STORAGE_KEYS.CACHE_META,
       STORAGE_KEYS.BIAYA_PROSES,
       STORAGE_KEYS.JURNAL_SKUM,
+      STORAGE_KEYS.PINJAMAN_SKUM,
     ];
     legacyKeys.forEach(k => {
       try { localStorage.removeItem(k); } catch (e) { /* ignore */ }
@@ -167,6 +170,7 @@ export class StorageService {
     this.saveCases(INITIAL_CASE_RECORDS);
     this.saveBiayaProsesRecords(INITIAL_BIAYA_PROSES_RECORDS);
     this.saveJurnalSkumRecords(INITIAL_JURNAL_SKUM_RECORDS);
+    this.savePinjamanSkumRecords(INITIAL_PINJAMAN_SKUM_RECORDS);
   }
 
   static getJurnalSkumRecords(): JurnalBiayaSkumRecord[] {
@@ -208,6 +212,27 @@ export class StorageService {
       localStorage.setItem(STORAGE_KEYS.BIAYA_PROSES, JSON.stringify(records));
     } catch (e) {
       console.error('Error saving biaya proses records:', e);
+    }
+  }
+
+  static getPinjamanSkumRecords(): PinjamanSkumRecord[] {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.PINJAMAN_SKUM);
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error('Error loading pinjaman skum records:', e);
+    }
+    this.savePinjamanSkumRecords(INITIAL_PINJAMAN_SKUM_RECORDS);
+    return INITIAL_PINJAMAN_SKUM_RECORDS;
+  }
+
+  static savePinjamanSkumRecords(records: PinjamanSkumRecord[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.PINJAMAN_SKUM, JSON.stringify(records));
+    } catch (e) {
+      console.error('Error saving pinjaman skum records:', e);
     }
   }
 

@@ -7,6 +7,7 @@ import {
   CacheMetadata,
   BiayaProsesRecord,
   JurnalBiayaSkumRecord,
+  PinjamanSkumRecord,
   StatusPerkara
 } from './types';
 import { StorageService, TARGET_APPS_SCRIPT_URL } from './services/storage';
@@ -32,6 +33,7 @@ export default function App() {
   const [cases, setCases] = useState<CaseRecord[]>([]);
   const [biayaProsesRecords, setBiayaProsesRecords] = useState<BiayaProsesRecord[]>([]);
   const [jurnalSkumRecords, setJurnalSkumRecords] = useState<JurnalBiayaSkumRecord[]>([]);
+  const [pinjamanSkumRecords, setPinjamanSkumRecords] = useState<PinjamanSkumRecord[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [syncSettings, setSyncSettings] = useState<SyncSettings>(StorageService.getSyncSettings());
   const [cacheMeta, setCacheMeta] = useState<CacheMetadata>(StorageService.getCacheMeta());
@@ -174,6 +176,7 @@ export default function App() {
     const loadedCases = StorageService.getCases();
     const loadedBiayaProses = StorageService.getBiayaProsesRecords();
     const loadedJurnalSkum = StorageService.getJurnalSkumRecords();
+    const loadedPinjamanSkum = StorageService.getPinjamanSkumRecords();
     const loadedNotifs = StorageService.getNotifications();
     const currentSyncSettings = StorageService.getSyncSettings();
 
@@ -182,6 +185,7 @@ export default function App() {
     setCases(syncedLoadedCases);
     setBiayaProsesRecords(loadedBiayaProses);
     setJurnalSkumRecords(sortSkumRecords(loadedJurnalSkum));
+    setPinjamanSkumRecords(loadedPinjamanSkum);
     setNotifications(loadedNotifs);
     setCacheMeta(StorageService.getCacheMeta());
 
@@ -268,6 +272,11 @@ export default function App() {
     const sorted = sortSkumRecords(newRecords);
     setJurnalSkumRecords(sorted);
     StorageService.saveJurnalSkumRecords(sorted);
+  }, []);
+
+  const updatePinjamanSkumState = useCallback((newRecords: PinjamanSkumRecord[]) => {
+    setPinjamanSkumRecords(newRecords);
+    StorageService.savePinjamanSkumRecords(newRecords);
   }, []);
 
   const addNotification = useCallback((title: string, message: string, type: 'info' | 'success' | 'warning' | 'alert', nomorPerkara?: string) => {
@@ -616,6 +625,128 @@ export default function App() {
     }
   };
 
+  const handleAddPinjamanSkum = (data: {
+    tanggal: string;
+    nomorPerkara: string;
+    peminjam: string;
+    jumlah: number;
+    keterangan: string;
+  }) => {
+    const now = Date.now();
+    const skumId = `skum-pinjam-${now}`;
+    const pinjamanId = `pinjam-${now}`;
+
+    const newPinjaman: PinjamanSkumRecord = {
+      id: pinjamanId,
+      tanggal: data.tanggal || new Date().toISOString().split('T')[0],
+      nomorPerkara: data.nomorPerkara || 'Kepaniteraan Umum',
+      peminjam: data.peminjam,
+      jumlah: data.jumlah,
+      keterangan: data.keterangan || '',
+      status: 'BELUM_DIBAYAR',
+      createdAt: new Date().toISOString(),
+      skumPengeluaranId: skumId
+    };
+
+    const newSkumRecord: JurnalBiayaSkumRecord = {
+      id: skumId,
+      tanggal: data.tanggal || new Date().toISOString().split('T')[0],
+      nomorPerkara: data.nomorPerkara || 'Kepaniteraan Umum',
+      uraian: `Peminjaman Saldo SKUM: ${data.peminjam}`,
+      penerimaan: 0,
+      pengeluaran: data.jumlah,
+      kategori: 'Pinjaman',
+      keterangan: `Peminjaman Saldo SKUM Kepaniteraan (${data.keterangan || 'Belum Dibayar'})`,
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedPinjaman = [newPinjaman, ...pinjamanSkumRecords];
+    updatePinjamanSkumState(updatedPinjaman);
+
+    const updatedSkum = [newSkumRecord, ...jurnalSkumRecords];
+    updateJurnalSkumState(updatedSkum);
+
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    updateCasesState(updatedCases);
+
+    addNotification(
+      '⚠️ Peminjaman Saldo SKUM',
+      `Peminjaman saldo SKUM sebesar Rp ${data.jumlah.toLocaleString('id-ID')} oleh ${data.peminjam} telah dicatat dan memotong saldo sementara.`,
+      'warning',
+      data.nomorPerkara
+    );
+  };
+
+  const handleBayarPinjamanSkum = (pinjamanId: string) => {
+    const target = pinjamanSkumRecords.find(p => p.id === pinjamanId);
+    if (!target) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    const now = Date.now();
+    const skumKembaliId = `skum-kembali-${now}`;
+
+    const updatedPinjaman = pinjamanSkumRecords.map(p => {
+      if (p.id === pinjamanId) {
+        return {
+          ...p,
+          status: 'SUDAH_DIBAYAR' as const,
+          tanggalBayar: today,
+          skumPengembalianId: skumKembaliId
+        };
+      }
+      return p;
+    });
+    updatePinjamanSkumState(updatedPinjaman);
+
+    const newSkumRecord: JurnalBiayaSkumRecord = {
+      id: skumKembaliId,
+      tanggal: today,
+      nomorPerkara: target.nomorPerkara,
+      uraian: `Pengembalian Pinjaman Saldo SKUM: ${target.peminjam}`,
+      penerimaan: target.jumlah,
+      pengeluaran: 0,
+      kategori: 'Pinjaman',
+      keterangan: `Pelunasan Peminjaman Saldo SKUM Kepaniteraan (Tanggal Bayar: ${today})`,
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedSkum = [newSkumRecord, ...jurnalSkumRecords];
+    updateJurnalSkumState(updatedSkum);
+
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    updateCasesState(updatedCases);
+
+    addNotification(
+      '✅ Pelunasan Pinjaman SKUM',
+      `Pinjaman SKUM sebesar Rp ${target.jumlah.toLocaleString('id-ID')} (${target.peminjam}) telah DIBAYAR & DIKEMBALIKAN ke Saldo SKUM.`,
+      'success',
+      target.nomorPerkara
+    );
+  };
+
+  const handleDeletePinjamanSkum = (pinjamanId: string) => {
+    const target = pinjamanSkumRecords.find(p => p.id === pinjamanId);
+    if (!target) return;
+
+    const updatedPinjaman = pinjamanSkumRecords.filter(p => p.id !== pinjamanId);
+    updatePinjamanSkumState(updatedPinjaman);
+
+    const updatedSkum = jurnalSkumRecords.filter(s => 
+      s.id !== target.skumPengeluaranId && s.id !== target.skumPengembalianId
+    );
+    updateJurnalSkumState(updatedSkum);
+
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    updateCasesState(updatedCases);
+
+    addNotification(
+      'Catatan Pinjaman Dihapus',
+      `Catatan peminjaman SKUM ${target.peminjam} telah dihapus.`,
+      'info',
+      target.nomorPerkara
+    );
+  };
+
   // Handle Jurnal SKUM execution per case
   const handleExecuteJurnal = (
     caseId: string,
@@ -940,6 +1071,7 @@ export default function App() {
           <JurnalBiayaSkumView
             records={jurnalSkumRecords}
             cases={cases}
+            pinjamanRecords={pinjamanSkumRecords}
             onAddRecord={handleAddJurnalSkumRecord}
             onUpdateRecord={handleUpdateJurnalSkumRecord}
             onDeleteRecord={handleDeleteJurnalSkumRecord}
@@ -947,6 +1079,9 @@ export default function App() {
               setJurnalSelectedCase(cases[0] || null);
               setIsJurnalModalOpen(true);
             }}
+            onAddPinjaman={handleAddPinjamanSkum}
+            onBayarPinjaman={handleBayarPinjamanSkum}
+            onDeletePinjaman={handleDeletePinjamanSkum}
             theme={theme}
           />
         ) : activeTab === 'buku-biaya-proses' ? (

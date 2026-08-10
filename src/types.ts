@@ -97,8 +97,22 @@ export interface JurnalBiayaSkumRecord {
   penerimaan: number;     // Debet SKUM (Panjar Awal / Tambah Panjar)
   pengeluaran: number;    // Kredit SKUM (Panggilan, Meterai, Redaksi, Pemberkasan ATK, Sisa Panjar)
   keterangan: string;     // Catatan tambahan SKUM
-  kategori: 'Panjar' | 'Panggilan' | 'Meterai' | 'Redaksi' | 'ATK' | 'Proses' | 'Sisa Panjar' | 'Lainnya';
+  kategori: 'Panjar' | 'Panggilan' | 'Meterai' | 'Redaksi' | 'ATK' | 'Proses' | 'Sisa Panjar' | 'Pinjaman' | 'Lainnya';
   createdAt: string;
+}
+
+export interface PinjamanSkumRecord {
+  id: string;
+  tanggal: string;          // YYYY-MM-DD (tanggal pinjam)
+  nomorPerkara: string;     // Nomor Perkara or "Kepaniteraan Umum"
+  peminjam: string;         // Nama peminjam / Keperluan kepaniteraan
+  jumlah: number;           // Nominal dipinjam (Rp)
+  keterangan: string;       // Catatan / alasan pinjaman
+  status: 'BELUM_DIBAYAR' | 'SUDAH_DIBAYAR';
+  tanggalBayar?: string;    // YYYY-MM-DD
+  createdAt: string;        // ISO timestamp
+  skumPengeluaranId?: string;  // ID of pengeluaran in Jurnal SKUM
+  skumPengembalianId?: string; // ID of pengembalian in Jurnal SKUM
 }
 
 export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table';
