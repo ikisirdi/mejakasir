@@ -103,6 +103,8 @@ export default function App() {
         effectivePanjar = totalPenerimaan;
       } else if (totalPenerimaan > 0) {
         effectivePanjar = Math.max(c.panjarAwal || 0, (c.panjarAwal || 0) + totalPenerimaan);
+      } else if (effectivePanjar === 0 && (c.saldoPerkara || 0) > 0) {
+        effectivePanjar = (c.saldoPerkara || 0) + totalPengeluaran;
       }
 
       const hasSisaPanjarLog = caseSkumLogs.some(r =>
@@ -138,37 +140,40 @@ export default function App() {
         ))
       );
 
-      // PRIORITIZE SPREADSHEET SALDO 0 OR COMPLETED STATUS:
-      // If the case from Spreadsheet explicitly has saldoPerkara === 0, OR status is 'Selesai' / 'Arsip', OR has a Sisa Panjar log,
-      // strictly retain saldoPerkara as 0!
-      const isSpreadsheetZeroOrFinished = 
-        c.saldoPerkara === 0 || 
-        c.status === 'Selesai' || 
-        c.status === 'Arsip' || 
-        hasSisaPanjarLog;
-
-      const calculatedSaldo = Math.max(0, effectivePanjar - totalPengeluaran);
-      const finalSaldo = isSpreadsheetZeroOrFinished ? 0 : calculatedSaldo;
+      // Determine new balance:
+      // 1. If 'Sisa Panjar' log exists, remaining balance was refunded -> saldo = 0
+      // 2. If SKUM logs exist, dynamically calculate: effectivePanjar - totalPengeluaran
+      // 3. If NO SKUM logs exist at all for this case, restore/retain effectivePanjar or c.saldoPerkara
+      let newSaldo = c.saldoPerkara;
+      if (hasSisaPanjarLog) {
+        newSaldo = 0;
+      } else if (caseSkumLogs.length > 0) {
+        newSaldo = Math.max(0, effectivePanjar - totalPengeluaran);
+      } else if (effectivePanjar > 0) {
+        newSaldo = effectivePanjar;
+      }
 
       let newStatus: StatusPerkara = c.status || 'Pendaftaran';
 
-      if (finalSaldo === 0 || isSpreadsheetZeroOrFinished) {
+      if (newSaldo === 0 || hasSisaPanjarLog) {
         newStatus = c.status === 'Arsip' ? 'Arsip' : 'Selesai';
       } else if (hasMinutasiLog) {
         newStatus = 'Minutasi';
       } else if (hasPutusanLog || c.tanggalPutus) {
         newStatus = 'Putus';
-      } else if (hasActivityLog || totalPengeluaran > 0) {
-        if (c.status === 'Pendaftaran') {
+      } else if (hasActivityLog || totalPengeluaran > 0 || caseSkumLogs.length > 0) {
+        if (c.status === 'Pendaftaran' || c.status === 'Selesai') {
           newStatus = 'Diperiksa';
         }
+      } else if (c.status === 'Selesai' && newSaldo > 0) {
+        newStatus = 'Diperiksa';
       }
 
       return {
         ...c,
-        panjarAwal: effectivePanjar,
-        pengeluaran: isSpreadsheetZeroOrFinished ? Math.max(totalPengeluaran, effectivePanjar) : totalPengeluaran,
-        saldoPerkara: finalSaldo,
+        panjarAwal: effectivePanjar > 0 ? effectivePanjar : c.panjarAwal,
+        pengeluaran: caseSkumLogs.length > 0 ? totalPengeluaran : 0,
+        saldoPerkara: newSaldo,
         status: newStatus,
         updatedAt: new Date().toISOString()
       };
@@ -535,8 +540,31 @@ export default function App() {
         pengeluaran: isDebet ? 0 : (updatedRecord.pengeluaran || 0)
       };
 
+      const oldRecord = jurnalSkumRecords.find(r => r.id === cleanRecord.id);
       const updatedSkum = jurnalSkumRecords.map(r => r.id === cleanRecord.id ? cleanRecord : r);
       updateJurnalSkumState(updatedSkum);
+
+      // Sync with Buku Bantu Biaya Proses records if matching entry exists
+      const normNomor = (cleanRecord.nomorPerkara || '').trim().toLowerCase();
+      if (oldRecord && normNomor) {
+        const oldUraian = (oldRecord.uraian || '').trim().toLowerCase();
+        const updatedBp = biayaProsesRecords.map(b => {
+          const bNomor = (b.nomorPerkara || '').trim().toLowerCase();
+          const bUraian = (b.uraian || '').trim().toLowerCase();
+          if (bNomor === normNomor && (bUraian === oldUraian || b.kategori === oldRecord.kategori)) {
+            return {
+              ...b,
+              tanggal: cleanRecord.tanggal,
+              uraian: cleanRecord.uraian,
+              kategori: cleanRecord.kategori as any,
+              penerimaan: cleanRecord.kategori === 'ATK' ? (cleanRecord.pengeluaran || cleanRecord.penerimaan) : b.penerimaan,
+              pengeluaran: cleanRecord.kategori !== 'ATK' ? cleanRecord.pengeluaran : b.pengeluaran
+            };
+          }
+          return b;
+        });
+        updateBiayaProsesState(updatedBp);
+      }
 
       // Reupdate cases state based on updated SKUM logs
       const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
@@ -553,7 +581,7 @@ export default function App() {
 
       addNotification(
         'Log SKUM Berhasil Diperbarui',
-        `Berhasil memperbarui data transaksi SKUM perkara ${cleanRecord.nomorPerkara}: ${cleanRecord.uraian}`,
+        `Berhasil memperbarui data transaksi SKUM perkara ${cleanRecord.nomorPerkara}: ${cleanRecord.uraian}. Saldo perkara telah dihitung ulang.`,
         'info',
         cleanRecord.nomorPerkara
       );
@@ -570,36 +598,28 @@ export default function App() {
         return;
       }
       const normNomor = (target.nomorPerkara || '').trim().toLowerCase();
+      const targetUraian = (target.uraian || '').trim().toLowerCase();
+
       const updatedSkum = jurnalSkumRecords.filter(r => r.id !== id);
       updateJurnalSkumState(updatedSkum);
 
-      // Cascade delete corresponding Buku Bantu Biaya Proses record for this nomorPerkara
-      const isAtkRecord = target.kategori === 'ATK' || 
-                          target.uraian.toLowerCase().includes('atk') || 
-                          target.uraian.toLowerCase().includes('pemberkasan');
-
+      // Delete corresponding Buku Bantu Biaya Proses record for this transaction
       let deletedBpRecords: BiayaProsesRecord[] = [];
       let updatedBpRecords = biayaProsesRecords;
 
       if (normNomor) {
-        if (isAtkRecord) {
-          deletedBpRecords = biayaProsesRecords.filter(b => {
-            const bNomor = (b.nomorPerkara || '').trim().toLowerCase();
-            if (bNomor !== normNomor) return false;
-            return b.uraian.trim().toLowerCase() === target.uraian.trim().toLowerCase() ||
-                   b.kategori === 'ATK' ||
-                   b.penerimaan === target.penerimaan;
-          });
-          updatedBpRecords = biayaProsesRecords.filter(b => !deletedBpRecords.some(d => d.id === b.id));
-        } else {
-          const remainingSkumForCase = updatedSkum.filter(s => (s.nomorPerkara || '').trim().toLowerCase() === normNomor);
-          if (remainingSkumForCase.length === 0) {
-            deletedBpRecords = biayaProsesRecords.filter(b => (b.nomorPerkara || '').trim().toLowerCase() === normNomor);
-            updatedBpRecords = biayaProsesRecords.filter(b => (b.nomorPerkara || '').trim().toLowerCase() !== normNomor);
-          }
-        }
+        deletedBpRecords = biayaProsesRecords.filter(b => {
+          const bNomor = (b.nomorPerkara || '').trim().toLowerCase();
+          if (bNomor !== normNomor) return false;
+          const bUraian = (b.uraian || '').trim().toLowerCase();
+          return bUraian === targetUraian || 
+                 (b.kategori === target.kategori && target.kategori !== 'Lainnya') ||
+                 b.penerimaan === target.pengeluaran ||
+                 b.pengeluaran === target.pengeluaran;
+        });
 
         if (deletedBpRecords.length > 0) {
+          updatedBpRecords = biayaProsesRecords.filter(b => !deletedBpRecords.some(d => d.id === b.id));
           updateBiayaProsesState(updatedBpRecords);
         }
       }
@@ -622,7 +642,7 @@ export default function App() {
 
       addNotification(
         'Log SKUM Berhasil Dihapus',
-        `Data transaksi SKUM perkara ${target.nomorPerkara} (${target.uraian}) telah dihapus.${deletedBpRecords.length > 0 ? ' Log transaksi terkait di Buku Bantu Biaya Proses juga dihapus.' : ''}`,
+        `Data transaksi SKUM perkara ${target.nomorPerkara} (${target.uraian}) telah dihapus. Saldo perkara telah dikembalikan secara otomatis.`,
         'warning',
         target.nomorPerkara
       );
