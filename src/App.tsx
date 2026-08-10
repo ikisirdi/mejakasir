@@ -90,14 +90,6 @@ export default function App() {
         caseSkumLogs = skumList.filter(r => r.nomorPerkara && r.nomorPerkara.trim().toLowerCase() === normCaseNum);
       }
 
-      if (caseSkumLogs.length === 0) {
-        // If case has 0 balance even without logs, set status to Selesai
-        if (c.saldoPerkara === 0 && c.status !== 'Selesai' && c.status !== 'Arsip') {
-          return { ...c, status: 'Selesai', updatedAt: new Date().toISOString() };
-        }
-        return c;
-      }
-
       const totalPenerimaan = caseSkumLogs.reduce((sum, r) => sum + (Number(r.penerimaan) || 0), 0);
       const totalPengeluaran = caseSkumLogs.reduce((sum, r) => sum + (Number(r.pengeluaran) || 0), 0);
 
@@ -113,14 +105,13 @@ export default function App() {
         effectivePanjar = Math.max(c.panjarAwal || 0, (c.panjarAwal || 0) + totalPenerimaan);
       }
 
-      const newSaldo = Math.max(0, effectivePanjar - totalPengeluaran);
-
-      // Derive auto-status based on logs and balance
-      let newStatus: StatusPerkara = c.status || 'Pendaftaran';
-
       const hasSisaPanjarLog = caseSkumLogs.some(r =>
         r.kategori === 'Sisa Panjar' ||
-        (r.uraian && r.uraian.toLowerCase().includes('sisa panjar'))
+        (r.uraian && (
+          r.uraian.toLowerCase().includes('sisa panjar') ||
+          r.uraian.toLowerCase().includes('pengembalian panjar') ||
+          r.uraian.toLowerCase().includes('pengembalian sisa')
+        ))
       );
 
       const hasMinutasiLog = caseSkumLogs.some(r =>
@@ -147,9 +138,22 @@ export default function App() {
         ))
       );
 
-      if (newSaldo === 0 || hasSisaPanjarLog) {
-        // Balance is 0 or sisa panjar returned -> Selesai
-        newStatus = 'Selesai';
+      // PRIORITIZE SPREADSHEET SALDO 0 OR COMPLETED STATUS:
+      // If the case from Spreadsheet explicitly has saldoPerkara === 0, OR status is 'Selesai' / 'Arsip', OR has a Sisa Panjar log,
+      // strictly retain saldoPerkara as 0!
+      const isSpreadsheetZeroOrFinished = 
+        c.saldoPerkara === 0 || 
+        c.status === 'Selesai' || 
+        c.status === 'Arsip' || 
+        hasSisaPanjarLog;
+
+      const calculatedSaldo = Math.max(0, effectivePanjar - totalPengeluaran);
+      const finalSaldo = isSpreadsheetZeroOrFinished ? 0 : calculatedSaldo;
+
+      let newStatus: StatusPerkara = c.status || 'Pendaftaran';
+
+      if (finalSaldo === 0 || isSpreadsheetZeroOrFinished) {
+        newStatus = c.status === 'Arsip' ? 'Arsip' : 'Selesai';
       } else if (hasMinutasiLog) {
         newStatus = 'Minutasi';
       } else if (hasPutusanLog || c.tanggalPutus) {
@@ -163,8 +167,8 @@ export default function App() {
       return {
         ...c,
         panjarAwal: effectivePanjar,
-        pengeluaran: totalPengeluaran,
-        saldoPerkara: newSaldo,
+        pengeluaran: isSpreadsheetZeroOrFinished ? Math.max(totalPengeluaran, effectivePanjar) : totalPengeluaran,
+        saldoPerkara: finalSaldo,
         status: newStatus,
         updatedAt: new Date().toISOString()
       };
@@ -199,9 +203,11 @@ export default function App() {
           const appsScriptData = await SyncService.fetchFromAppsScript(targetUrl);
           if (appsScriptData && appsScriptData.cases.length > 0) {
             let fetchedCases = appsScriptData.cases;
-            if (appsScriptData.jurnalSkum && appsScriptData.jurnalSkum.length > 0) {
-              fetchedCases = updateCasesWithSkumLogs(fetchedCases, appsScriptData.jurnalSkum);
-            }
+            const activeJurnal = (appsScriptData.jurnalSkum && appsScriptData.jurnalSkum.length > 0)
+              ? appsScriptData.jurnalSkum
+              : loadedJurnalSkum;
+
+            fetchedCases = updateCasesWithSkumLogs(fetchedCases, activeJurnal);
             const uniqueFetched = ensureUniqueCaseIds(fetchedCases);
             setCases(uniqueFetched);
             StorageService.saveCases(uniqueFetched);
