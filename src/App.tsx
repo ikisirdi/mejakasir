@@ -94,15 +94,15 @@ export default function App() {
       const totalPengeluaran = caseSkumLogs.reduce((sum, r) => sum + (Number(r.pengeluaran) || 0), 0);
 
       const hasPanjarAwalLog = caseSkumLogs.some(r =>
-        r.kategori === 'Panjar' ||
+        (r.kategori === 'Panjar' && (Number(r.penerimaan) || 0) > 0) ||
         (r.uraian && r.uraian.toLowerCase().includes('panjar awal'))
       );
 
       let effectivePanjar = c.panjarAwal || 0;
-      if (hasPanjarAwalLog) {
+      if (hasPanjarAwalLog && totalPenerimaan > 0) {
         effectivePanjar = totalPenerimaan;
       } else if (totalPenerimaan > 0) {
-        effectivePanjar = Math.max(c.panjarAwal || 0, (c.panjarAwal || 0) + totalPenerimaan);
+        effectivePanjar = Math.max(c.panjarAwal || 0, totalPenerimaan);
       } else if (effectivePanjar === 0 && (c.saldoPerkara || 0) > 0) {
         effectivePanjar = (c.saldoPerkara || 0) + totalPengeluaran;
       }
@@ -494,12 +494,15 @@ export default function App() {
 
   // Handlers for Jurnal Biaya SKUM
   const handleAddJurnalSkumRecord = (record: Omit<JurnalBiayaSkumRecord, 'id' | 'createdAt'>) => {
-    // Ensure penerimaan & pengeluaran are mutually exclusive
-    const isDebet = record.penerimaan > 0 || record.kategori === 'Panjar';
+    // Determine whether transaction is Debet (Penerimaan Panjar) or Kredit (Pengeluaran Biaya Perkara)
+    const isExplicitExpense = (Number(record.pengeluaran) || 0) > 0;
+    const isExplicitIncome = (Number(record.penerimaan) || 0) > 0;
+    const isDebet = isExplicitIncome || (!isExplicitExpense && record.kategori === 'Panjar');
+
     const cleanRecord = {
       ...record,
-      penerimaan: isDebet ? (record.penerimaan || record.pengeluaran || 0) : 0,
-      pengeluaran: isDebet ? 0 : (record.pengeluaran || 0)
+      penerimaan: isDebet ? (Number(record.penerimaan) || Number(record.pengeluaran) || 0) : 0,
+      pengeluaran: isDebet ? 0 : (Number(record.pengeluaran) || 0)
     };
 
     const newRecord: JurnalBiayaSkumRecord = {
@@ -533,11 +536,14 @@ export default function App() {
 
   const handleUpdateJurnalSkumRecord = (updatedRecord: JurnalBiayaSkumRecord) => {
     try {
-      const isDebet = updatedRecord.penerimaan > 0 || updatedRecord.kategori === 'Panjar';
+      const isExplicitExpense = (Number(updatedRecord.pengeluaran) || 0) > 0;
+      const isExplicitIncome = (Number(updatedRecord.penerimaan) || 0) > 0;
+      const isDebet = isExplicitIncome || (!isExplicitExpense && updatedRecord.kategori === 'Panjar');
+
       const cleanRecord: JurnalBiayaSkumRecord = {
         ...updatedRecord,
-        penerimaan: isDebet ? (updatedRecord.penerimaan || updatedRecord.pengeluaran || 0) : 0,
-        pengeluaran: isDebet ? 0 : (updatedRecord.pengeluaran || 0)
+        penerimaan: isDebet ? (Number(updatedRecord.penerimaan) || Number(updatedRecord.pengeluaran) || 0) : 0,
+        pengeluaran: isDebet ? 0 : (Number(updatedRecord.pengeluaran) || 0)
       };
 
       const oldRecord = jurnalSkumRecords.find(r => r.id === cleanRecord.id);

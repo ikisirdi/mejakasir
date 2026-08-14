@@ -139,19 +139,22 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingRecord || !editNomorPerkara || !editUraian || editNominal < 0) {
-      alert('Mohon isi nomor perkara, uraian, dan nominal transaksi.');
+    if (!editingRecord || !editNomorPerkara || !editUraian || editNominal <= 0) {
+      alert('Mohon isi nomor perkara, uraian, dan nominal transaksi yang valid (> 0).');
       return;
     }
+
+    const isKredit = editJenisTransaksi === 'KREDIT';
+    const finalKategori = isKredit && editKategori === 'Panjar' ? 'Panggilan' : editKategori;
 
     onUpdateRecord({
       ...editingRecord,
       tanggal: editTanggal,
       nomorPerkara: editNomorPerkara,
       uraian: editUraian,
-      penerimaan: editJenisTransaksi === 'DEBET' ? editNominal : 0,
-      pengeluaran: editJenisTransaksi === 'KREDIT' ? editNominal : 0,
-      kategori: editKategori,
+      penerimaan: isKredit ? 0 : editNominal,
+      pengeluaran: isKredit ? editNominal : 0,
+      kategori: finalKategori,
       keterangan: editKeterangan
     });
 
@@ -268,18 +271,21 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
   const handleSubmitManual = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formNomorPerkara || !formUraian || formNominal < 0) {
-      alert('Mohon lengkapi nomor perkara, uraian, dan nominal transaksi.');
+    if (!formNomorPerkara || !formUraian || formNominal <= 0) {
+      alert('Mohon lengkapi nomor perkara, uraian, dan nominal transaksi yang valid (> 0).');
       return;
     }
+
+    const isKredit = formJenisTransaksi === 'KREDIT';
+    const finalKategori = isKredit && formKategori === 'Panjar' ? 'Panggilan' : formKategori;
 
     onAddRecord({
       tanggal: formTanggal,
       nomorPerkara: formNomorPerkara,
       uraian: formUraian,
-      penerimaan: formJenisTransaksi === 'DEBET' ? formNominal : 0,
-      pengeluaran: formJenisTransaksi === 'KREDIT' ? formNominal : 0,
-      kategori: formKategori,
+      penerimaan: isKredit ? 0 : formNominal,
+      pengeluaran: isKredit ? formNominal : 0,
+      kategori: finalKategori,
       keterangan: formKeterangan || 'Log Transaksi Manual Jurnal SKUM'
     });
 
@@ -982,15 +988,38 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                   <label className="block font-bold mb-1">Jenis Transaksi SKUM:</label>
                   <select
                     value={formJenisTransaksi}
-                    onChange={(e) => setFormJenisTransaksi(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as 'DEBET' | 'KREDIT';
+                      setFormJenisTransaksi(val);
+                      if (val === 'KREDIT' && formKategori === 'Panjar') {
+                        setFormKategori('Panggilan');
+                      } else if (val === 'DEBET') {
+                        setFormKategori('Panjar');
+                      }
+                    }}
                     className={`w-full p-2.5 rounded-xl border font-bold ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-800 border-slate-700'
+                      formJenisTransaksi === 'KREDIT'
+                        ? 'bg-rose-50 border-rose-300 text-rose-800 dark:bg-rose-950/40 dark:border-rose-700 dark:text-rose-200'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-200'
                     }`}
                   >
-                    <option value="KREDIT">KREDIT (Pengeluaran SKUM)</option>
-                    <option value="DEBET">DEBET (Penerimaan / Panjar)</option>
+                    <option value="KREDIT">🔴 KREDIT (Pengeluaran / Potong Saldo)</option>
+                    <option value="DEBET">🟢 DEBET (Penerimaan / Tambah Panjar)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Status Helper Banner */}
+              <div className={`p-2.5 rounded-xl text-[11px] font-semibold border flex items-center space-x-2 ${
+                formJenisTransaksi === 'KREDIT'
+                  ? 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-200'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200'
+              }`}>
+                <span>
+                  {formJenisTransaksi === 'KREDIT'
+                    ? '🔴 Pengeluaran / Potongan Biaya: Saldo perkara akan BERKURANG sebesar nominal yang diinput.'
+                    : '🟢 Penerimaan Panjar Awal / Tambahan: Saldo perkara akan BERTAMBAH sebesar nominal yang diinput.'}
+                </span>
               </div>
 
               <div>
@@ -1012,7 +1041,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                   <label className="block font-bold mb-1">Nominal (Rp):</label>
                   <input
                     type="number"
-                    value={formNominal !== undefined && formNominal !== null ? formNominal : ''}
+                    min="1"
+                    placeholder="0"
+                    value={formNominal !== undefined && formNominal !== null && formNominal > 0 ? formNominal : ''}
                     onChange={(e) => setFormNominal(Number(e.target.value))}
                     className={`w-full p-2.5 rounded-xl border font-mono font-bold ${
                       isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-800 border-slate-700'
@@ -1030,14 +1061,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                       isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-800 border-slate-700'
                     }`}
                   >
-                    <option value="Panjar">Panjar Awal / Tambah</option>
-                    <option value="Panggilan">Panggilan</option>
-                    <option value="Meterai">Meterai</option>
-                    <option value="Redaksi">Redaksi</option>
-                    <option value="ATK">Pemberkasan / ATK</option>
-                    <option value="Proses">Proses / PNBP</option>
-                    <option value="Sisa Panjar">Sisa Panjar</option>
-                    <option value="Lainnya">Lainnya</option>
+                    {formJenisTransaksi === 'DEBET' ? (
+                      <option value="Panjar">Panjar Awal / Tambah Panjar</option>
+                    ) : (
+                      <>
+                        <option value="Panggilan">Panggilan</option>
+                        <option value="Meterai">Meterai</option>
+                        <option value="Redaksi">Redaksi</option>
+                        <option value="ATK">Pemberkasan / ATK</option>
+                        <option value="Proses">Proses / PNBP</option>
+                        <option value="Sisa Panjar">Pengembalian Sisa Panjar</option>
+                        <option value="Lainnya">Lainnya</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
@@ -1132,15 +1168,38 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                   <label className="block font-bold mb-1">Jenis Transaksi SKUM:</label>
                   <select
                     value={editJenisTransaksi}
-                    onChange={(e) => setEditJenisTransaksi(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as 'DEBET' | 'KREDIT';
+                      setEditJenisTransaksi(val);
+                      if (val === 'KREDIT' && editKategori === 'Panjar') {
+                        setEditKategori('Panggilan');
+                      } else if (val === 'DEBET') {
+                        setEditKategori('Panjar');
+                      }
+                    }}
                     className={`w-full p-2.5 rounded-xl border font-bold ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-800 border-slate-700'
+                      editJenisTransaksi === 'KREDIT'
+                        ? 'bg-rose-50 border-rose-300 text-rose-800 dark:bg-rose-950/40 dark:border-rose-700 dark:text-rose-200'
+                        : 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-200'
                     }`}
                   >
-                    <option value="KREDIT">KREDIT (Pengeluaran SKUM)</option>
-                    <option value="DEBET">DEBET (Penerimaan / Panjar)</option>
+                    <option value="KREDIT">🔴 KREDIT (Pengeluaran / Potong Saldo)</option>
+                    <option value="DEBET">🟢 DEBET (Penerimaan / Tambah Panjar)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Status Helper Banner */}
+              <div className={`p-2.5 rounded-xl text-[11px] font-semibold border flex items-center space-x-2 ${
+                editJenisTransaksi === 'KREDIT'
+                  ? 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-200'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200'
+              }`}>
+                <span>
+                  {editJenisTransaksi === 'KREDIT'
+                    ? '🔴 Pengeluaran / Potongan Biaya: Saldo perkara akan BERKURANG sebesar nominal yang diinput.'
+                    : '🟢 Penerimaan Panjar Awal / Tambahan: Saldo perkara akan BERTAMBAH sebesar nominal yang diinput.'}
+                </span>
               </div>
 
               <div>
@@ -1162,7 +1221,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                   <label className="block font-bold mb-1">Nominal (Rp):</label>
                   <input
                     type="number"
-                    value={editNominal !== undefined && editNominal !== null ? editNominal : ''}
+                    min="1"
+                    placeholder="0"
+                    value={editNominal !== undefined && editNominal !== null && editNominal > 0 ? editNominal : ''}
                     onChange={(e) => setEditNominal(Number(e.target.value))}
                     className={`w-full p-2.5 rounded-xl border font-mono font-bold ${
                       isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-800 border-slate-700'
@@ -1180,14 +1241,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                       isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-800 border-slate-700'
                     }`}
                   >
-                    <option value="Panjar">Panjar Awal / Tambah</option>
-                    <option value="Panggilan">Panggilan</option>
-                    <option value="Meterai">Meterai</option>
-                    <option value="Redaksi">Redaksi</option>
-                    <option value="ATK">Pemberkasan / ATK</option>
-                    <option value="Proses">Proses / PNBP</option>
-                    <option value="Sisa Panjar">Sisa Panjar</option>
-                    <option value="Lainnya">Lainnya</option>
+                    {editJenisTransaksi === 'DEBET' ? (
+                      <option value="Panjar">Panjar Awal / Tambah Panjar</option>
+                    ) : (
+                      <>
+                        <option value="Panggilan">Panggilan</option>
+                        <option value="Meterai">Meterai</option>
+                        <option value="Redaksi">Redaksi</option>
+                        <option value="ATK">Pemberkasan / ATK</option>
+                        <option value="Proses">Proses / PNBP</option>
+                        <option value="Sisa Panjar">Pengembalian Sisa Panjar</option>
+                        <option value="Lainnya">Lainnya</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
