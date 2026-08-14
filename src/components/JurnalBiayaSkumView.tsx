@@ -259,7 +259,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const handleFixDoublePosting = () => {
     if (doublePostingRecords.length === 0) return;
     doublePostingRecords.forEach(r => {
-      const isDebet = r.kategori === 'Panjar' || (r.uraian && r.uraian.toLowerCase().includes('panjar')) || r.penerimaan >= r.pengeluaran;
+      const isDebet = (r.kategori === 'Panjar' && !r.uraian.toLowerCase().includes('sisa panjar')) || 
+                      (r.uraian && r.uraian.toLowerCase().includes('panjar awal'));
       onUpdateRecord({
         ...r,
         penerimaan: isDebet ? (r.penerimaan || r.pengeluaran) : 0,

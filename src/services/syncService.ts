@@ -263,22 +263,33 @@ export class SyncService {
         });
 
         const mappedJurnal: JurnalBiayaSkumRecord[] = rawJurnal.map((j, idx) => {
-          const pen = Number(j.penerimaan) || 0;
-          const peng = Number(j.pengeluaran) || 0;
-          const isPanjar = j.kategori === 'Panjar' || 
-                           (j.uraian && (
-                             String(j.uraian).toLowerCase().includes('panjar') || 
-                             String(j.uraian).toLowerCase().includes('penerimaan')
-                           ));
-          const isDebet = isPanjar || (pen > 0 && peng === 0);
+          let pen = Number(j.penerimaan) || 0;
+          let peng = Number(j.pengeluaran) || 0;
+
+          // If both are filled (due to legacy script or double-entry bug), resolve deterministically:
+          if (pen > 0 && peng > 0) {
+            const isPanjarAwal = j.kategori === 'Panjar' || (j.uraian && String(j.uraian).toLowerCase().includes('panjar awal'));
+            if (isPanjarAwal) {
+              peng = 0;
+            } else {
+              pen = 0;
+            }
+          }
+
+          const isDebet = pen > 0 && peng === 0;
+          let finalKategori = j.kategori;
+          if (!finalKategori || finalKategori === 'undefined') {
+            finalKategori = isDebet ? 'Panjar' : 'Panggilan';
+          }
+
           return {
             id: String(j.id || `skum-${idx + 1}`),
             tanggal: String(j.tanggal || new Date().toISOString().split('T')[0]),
             nomorPerkara: String(j.nomorPerkara || '-'),
             uraian: String(j.uraian || ''),
-            penerimaan: isDebet ? (pen > 0 ? pen : peng) : pen,
-            pengeluaran: isDebet ? 0 : peng,
-            kategori: String(j.kategori || (isDebet ? 'Panjar' : 'Panggilan')) as any,
+            penerimaan: pen,
+            pengeluaran: peng,
+            kategori: String(finalKategori) as any,
             keterangan: String(j.keterangan || ''),
             createdAt: String(j.createdAt || new Date().toISOString())
           };

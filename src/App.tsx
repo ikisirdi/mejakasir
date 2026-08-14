@@ -65,6 +65,54 @@ export default function App() {
   const [jurnalSelectedCase, setJurnalSelectedCase] = useState<CaseRecord | null>(null);
   const [activeToast, setActiveToast] = useState<NotificationItem | null>(null);
 
+  // Sanitizer to guarantee SKUM Debet/Kredit correctness and heal legacy corrupted records
+  const sanitizeSkumRecords = (records: JurnalBiayaSkumRecord[]): JurnalBiayaSkumRecord[] => {
+    return records.map(r => {
+      const uraianLower = (r.uraian || '').toLowerCase();
+      let pen = Number(r.penerimaan) || 0;
+      let peng = Number(r.pengeluaran) || 0;
+      let kat = r.kategori || 'Panggilan';
+
+      const isExplicitPanjarAwal = uraianLower.includes('panjar awal') || 
+                                   uraianLower.includes('penerimaan panjar') || 
+                                   uraianLower.includes('tambah panjar') || 
+                                   uraianLower.includes('setoran panjar');
+
+      const isPinjam = kat === 'Pinjaman' || uraianLower.includes('peminjaman saldo') || uraianLower.includes('pinjam saldo');
+      const isSisaPanjar = kat === 'Sisa Panjar' || uraianLower.includes('sisa panjar') || uraianLower.includes('pengembalian sisa');
+
+      if (isExplicitPanjarAwal || (kat === 'Panjar' && !isPinjam && !isSisaPanjar && !uraianLower.includes('pencatatan jurnal:'))) {
+        // Penerimaan / Debet
+        const val = pen > 0 ? pen : peng;
+        pen = val;
+        peng = 0;
+        kat = 'Panjar';
+      } else {
+        // Pengeluaran / Kredit (Biaya Panggilan, ATK, Meterai, Redaksi, Pinjaman, Sisa Panjar, Proses)
+        const val = peng > 0 ? peng : pen;
+        pen = 0;
+        peng = val;
+        if (isPinjam) kat = 'Pinjaman';
+        else if (isSisaPanjar) kat = 'Sisa Panjar';
+        else if (kat === 'Panjar') {
+          if (uraianLower.includes('panggilan')) kat = 'Panggilan';
+          else if (uraianLower.includes('meterai')) kat = 'Meterai';
+          else if (uraianLower.includes('redaksi')) kat = 'Redaksi';
+          else if (uraianLower.includes('atk') || uraianLower.includes('pemberkasan')) kat = 'ATK';
+          else if (uraianLower.includes('proses') || uraianLower.includes('pnbp')) kat = 'Proses';
+          else kat = 'Panggilan';
+        }
+      }
+
+      return {
+        ...r,
+        penerimaan: pen,
+        pengeluaran: peng,
+        kategori: kat as any
+      };
+    });
+  };
+
   // Helper to ensure case IDs are unique
   const ensureUniqueCaseIds = (caseList: CaseRecord[]): CaseRecord[] => {
     const seen = new Set<string>();
@@ -83,11 +131,12 @@ export default function App() {
     currentCases: CaseRecord[],
     skumList: JurnalBiayaSkumRecord[]
   ): CaseRecord[] => {
+    const cleanSkumList = sanitizeSkumRecords(skumList);
     return currentCases.map(c => {
       let caseSkumLogs: JurnalBiayaSkumRecord[] = [];
       if (c.nomorPerkara) {
         const normCaseNum = c.nomorPerkara.trim().toLowerCase();
-        caseSkumLogs = skumList.filter(r => r.nomorPerkara && r.nomorPerkara.trim().toLowerCase() === normCaseNum);
+        caseSkumLogs = cleanSkumList.filter(r => r.nomorPerkara && r.nomorPerkara.trim().toLowerCase() === normCaseNum);
       }
 
       const totalPenerimaan = caseSkumLogs.reduce((sum, r) => sum + (Number(r.penerimaan) || 0), 0);
@@ -184,7 +233,7 @@ export default function App() {
   const loadDataFromSource = useCallback(async (isForceSpreadsheetOverwrite = false) => {
     const loadedCases = StorageService.getCases();
     const loadedBiayaProses = StorageService.getBiayaProsesRecords();
-    const loadedJurnalSkum = StorageService.getJurnalSkumRecords();
+    const loadedJurnalSkum = sanitizeSkumRecords(StorageService.getJurnalSkumRecords());
     const loadedPinjamanSkum = StorageService.getPinjamanSkumRecords();
     const loadedNotifs = StorageService.getNotifications();
     const currentSyncSettings = StorageService.getSyncSettings();
@@ -209,7 +258,7 @@ export default function App() {
           if (appsScriptData && appsScriptData.cases.length > 0) {
             let fetchedCases = appsScriptData.cases;
             const activeJurnal = (appsScriptData.jurnalSkum && appsScriptData.jurnalSkum.length > 0)
-              ? appsScriptData.jurnalSkum
+              ? sanitizeSkumRecords(appsScriptData.jurnalSkum)
               : loadedJurnalSkum;
 
             fetchedCases = updateCasesWithSkumLogs(fetchedCases, activeJurnal);
@@ -222,9 +271,9 @@ export default function App() {
               StorageService.saveBiayaProsesRecords(appsScriptData.biayaProses);
             }
 
-            if (appsScriptData.jurnalSkum.length > 0) {
-              setJurnalSkumRecords(appsScriptData.jurnalSkum);
-              StorageService.saveJurnalSkumRecords(appsScriptData.jurnalSkum);
+            if (activeJurnal.length > 0) {
+              setJurnalSkumRecords(sortSkumRecords(activeJurnal));
+              StorageService.saveJurnalSkumRecords(sortSkumRecords(activeJurnal));
             }
 
             setCacheMeta(StorageService.getCacheMeta());
@@ -280,7 +329,8 @@ export default function App() {
   }, []);
 
   const updateJurnalSkumState = useCallback((newRecords: JurnalBiayaSkumRecord[]) => {
-    const sorted = sortSkumRecords(newRecords);
+    const clean = sanitizeSkumRecords(newRecords);
+    const sorted = sortSkumRecords(clean);
     setJurnalSkumRecords(sorted);
     StorageService.saveJurnalSkumRecords(sorted);
   }, []);
