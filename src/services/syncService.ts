@@ -1,6 +1,51 @@
-import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, JenisPerkara, KategoriPerkara, StatusPerkara } from '../types';
+import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, JenisPerkara, KategoriPerkara, StatusPerkara } from '../types';
 
 export class SyncService {
+
+  /**
+   * Reconstruct PinjamanSkumRecord items from JurnalBiayaSkum records if sheet is legacy
+   */
+  static reconstructPinjamanFromJurnal(jurnalRecords: JurnalBiayaSkumRecord[]): PinjamanSkumRecord[] {
+    const pinjamMap = new Map<string, PinjamanSkumRecord>();
+    const returnNames = new Set<string>();
+
+    // First find repayments
+    jurnalRecords.forEach(j => {
+      const uraianLower = (j.uraian || '').toLowerCase();
+      if (uraianLower.includes('pengembalian pinjaman') || uraianLower.includes('pelunasan pinjaman')) {
+        const namePart = (j.uraian || '').split(':').slice(1).join(':').trim();
+        if (namePart) returnNames.add(namePart.toLowerCase());
+      }
+    });
+
+    // Then find loans
+    jurnalRecords.forEach(j => {
+      const uraianLower = (j.uraian || '').toLowerCase();
+      const isPinjam = j.kategori === 'Pinjaman' || 
+                       uraianLower.includes('peminjaman saldo') || 
+                       uraianLower.includes('pinjam saldo');
+
+      if (isPinjam && (Number(j.pengeluaran) || 0) > 0) {
+        const namePart = (j.uraian || '').split(':').slice(1).join(':').trim() || 'Kepaniteraan';
+        const isPaid = returnNames.has(namePart.toLowerCase());
+        
+        pinjamMap.set(j.id, {
+          id: `pinjam-${j.id.replace(/[^a-zA-Z0-9]/g, '')}`,
+          tanggal: j.tanggal,
+          nomorPerkara: j.nomorPerkara || 'Kepaniteraan Umum',
+          peminjam: namePart,
+          jumlah: Number(j.pengeluaran) || 0,
+          keterangan: j.keterangan || 'Peminjaman Saldo SKUM',
+          status: isPaid ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
+          tanggalBayar: isPaid ? j.tanggal : undefined,
+          createdAt: j.createdAt || new Date().toISOString(),
+          skumPengeluaranId: j.id
+        });
+      }
+    });
+
+    return Array.from(pinjamMap.values());
+  }
 
   /**
    * Parse CSV content into CaseRecord objects.
@@ -209,6 +254,7 @@ export class SyncService {
     cases: CaseRecord[]; 
     jurnalSkum: JurnalBiayaSkumRecord[];
     biayaProses: BiayaProsesRecord[];
+    pinjamanSkum?: PinjamanSkumRecord[];
   } | null> {
     const targetUrl = url.trim();
     if (!targetUrl || !targetUrl.includes('script.google.com')) return null;
@@ -221,6 +267,7 @@ export class SyncService {
       let rawCases: any[] = [];
       let rawJurnal: any[] = [];
       let rawBiaya: any[] = [];
+      let rawPinjaman: any[] = [];
 
       if (Array.isArray(json)) {
         rawCases = json;
@@ -234,9 +281,12 @@ export class SyncService {
 
         if (Array.isArray(json.biayaProses)) rawBiaya = json.biayaProses;
         else if (Array.isArray(json.biaya)) rawBiaya = json.biaya;
+
+        if (Array.isArray(json.pinjamanSkum)) rawPinjaman = json.pinjamanSkum;
+        else if (Array.isArray(json.pinjaman)) rawPinjaman = json.pinjaman;
       }
 
-      if (rawCases.length > 0 || rawJurnal.length > 0 || rawBiaya.length > 0) {
+      if (rawCases.length > 0 || rawJurnal.length > 0 || rawBiaya.length > 0 || rawPinjaman.length > 0) {
         const mappedCases: CaseRecord[] = rawCases.map((c, idx) => {
           const panjar = Number(c.panjarAwal || c.panjar_awal || c.panjar || c.penerimaan || 0);
           const saldo = Number(c.saldoPerkara || c.saldo_perkara || c.saldo || 0);
@@ -265,21 +315,41 @@ export class SyncService {
         const mappedJurnal: JurnalBiayaSkumRecord[] = rawJurnal.map((j, idx) => {
           let pen = Number(j.penerimaan) || 0;
           let peng = Number(j.pengeluaran) || 0;
+          const uraianLower = String(j.uraian || '').toLowerCase();
+
+          // Loan and repayment classification
+          const isPengembalianPinjaman = uraianLower.includes('pengembalian pinjaman') || 
+                                         uraianLower.includes('pelunasan pinjaman');
+          const isPeminjamanPinjaman = (j.kategori === 'Pinjaman' && !isPengembalianPinjaman) ||
+                                       uraianLower.includes('peminjaman saldo') || 
+                                       uraianLower.includes('pinjam saldo');
 
           // If both are filled (due to legacy script or double-entry bug), resolve deterministically:
           if (pen > 0 && peng > 0) {
-            const isPanjarAwal = j.kategori === 'Panjar' || (j.uraian && String(j.uraian).toLowerCase().includes('panjar awal'));
-            if (isPanjarAwal) {
+            const isPanjarAwal = j.kategori === 'Panjar' || uraianLower.includes('panjar awal');
+            if (isPanjarAwal || isPengembalianPinjaman) {
               peng = 0;
             } else {
               pen = 0;
             }
           }
 
+          if (isPeminjamanPinjaman) {
+            peng = peng > 0 ? peng : pen;
+            pen = 0;
+          } else if (isPengembalianPinjaman) {
+            pen = pen > 0 ? pen : peng;
+            peng = 0;
+          }
+
           const isDebet = pen > 0 && peng === 0;
           let finalKategori = j.kategori;
           if (!finalKategori || finalKategori === 'undefined') {
-            finalKategori = isDebet ? 'Panjar' : 'Panggilan';
+            if (isPeminjamanPinjaman || isPengembalianPinjaman) {
+              finalKategori = 'Pinjaman';
+            } else {
+              finalKategori = isDebet ? 'Panjar' : 'Panggilan';
+            }
           }
 
           return {
@@ -295,10 +365,30 @@ export class SyncService {
           };
         });
 
+        let mappedPinjaman: PinjamanSkumRecord[] = [];
+        if (rawPinjaman.length > 0) {
+          mappedPinjaman = rawPinjaman.map((p, idx) => ({
+            id: String(p.id || `pinjam-${idx + 1}`),
+            tanggal: String(p.tanggal || new Date().toISOString().split('T')[0]),
+            nomorPerkara: String(p.nomorPerkara || 'Kepaniteraan Umum'),
+            peminjam: String(p.peminjam || 'Kepaniteraan'),
+            jumlah: Number(p.jumlah) || 0,
+            keterangan: String(p.keterangan || ''),
+            status: String(p.status || 'BELUM_DIBAYAR') as any,
+            tanggalBayar: p.tanggalBayar ? String(p.tanggalBayar) : undefined,
+            skumPengeluaranId: p.skumPengeluaranId ? String(p.skumPengeluaranId) : undefined,
+            skumPengembalianId: p.skumPengembalianId ? String(p.skumPengembalianId) : undefined,
+            createdAt: String(p.createdAt || new Date().toISOString())
+          }));
+        } else if (mappedJurnal.length > 0) {
+          mappedPinjaman = SyncService.reconstructPinjamanFromJurnal(mappedJurnal);
+        }
+
         return {
           cases: mappedCases,
           jurnalSkum: mappedJurnal,
-          biayaProses: rawBiaya
+          biayaProses: rawBiaya,
+          pinjamanSkum: mappedPinjaman
         };
       }
     } catch (err) {

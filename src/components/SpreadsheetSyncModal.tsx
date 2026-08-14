@@ -89,6 +89,17 @@ function setupSheets() {
     ]);
     sheetBiaya.getRange('A1:I1').setFontWeight('bold').setBackground('#fef3c7');
   }
+
+  // 4. Sheet PinjamanSKUM (Pinjaman Saldo SKUM Kepaniteraan)
+  var sheetPinjam = ss.getSheetByName('PinjamanSKUM');
+  if (!sheetPinjam) {
+    sheetPinjam = ss.insertSheet('PinjamanSKUM');
+    sheetPinjam.appendRow([
+      'ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah',
+      'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At'
+    ]);
+    sheetPinjam.getRange('A1:K1').setFontWeight('bold').setBackground('#fde68a');
+  }
 }
 
 function doGet(e) {
@@ -164,12 +175,38 @@ function doGet(e) {
     }
   }
 
+  // Fetch PinjamanSKUM
+  var sheetPinjam = ss.getSheetByName('PinjamanSKUM');
+  var pinjamanSkum = [];
+  if (sheetPinjam) {
+    var dataPinjamRows = sheetPinjam.getDataRange().getValues();
+    for (var p = 1; p < dataPinjamRows.length; p++) {
+      var rowP = dataPinjamRows[p];
+      if (rowP[0] && String(rowP[0]).trim() !== '') {
+        pinjamanSkum.push({
+          id: String(rowP[0]),
+          tanggal: rowP[1] ? Utilities.formatDate(new Date(rowP[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+          nomorPerkara: String(rowP[2] || 'Kepaniteraan Umum'),
+          peminjam: String(rowP[3] || ''),
+          jumlah: Number(rowP[4]) || 0,
+          keterangan: String(rowP[5] || ''),
+          status: String(rowP[6] || 'BELUM_DIBAYAR'),
+          tanggalBayar: rowP[7] ? Utilities.formatDate(new Date(rowP[7]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : undefined,
+          skumPengeluaranId: rowP[8] ? String(rowP[8]) : undefined,
+          skumPengembalianId: rowP[9] ? String(rowP[9]) : undefined,
+          createdAt: String(rowP[10] || '')
+        });
+      }
+    }
+  }
+
   var response = {
     status: 'success',
     timestamp: new Date().toISOString(),
     cases: cases,
     jurnalSkum: jurnalSkum,
-    biayaProses: biayaProses
+    biayaProses: biayaProses,
+    pinjamanSkum: pinjamanSkum
   };
 
   return ContentService.createTextOutput(JSON.stringify(response))
@@ -194,6 +231,9 @@ function doPost(e) {
       }
       if (payload.jurnalSkum && Array.isArray(payload.jurnalSkum)) {
         writeJurnalSkumToSheet(ss, payload.jurnalSkum);
+      }
+      if (payload.pinjamanSkum && Array.isArray(payload.pinjamanSkum)) {
+        writePinjamanSkumToSheet(ss, payload.pinjamanSkum);
       }
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Sync all complete' })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -363,6 +403,58 @@ function doPost(e) {
           }
         }
       }
+    } else if (action === 'add_pinjaman_skum' || action === 'update_pinjaman_skum') {
+      var sheet = ss.getSheetByName('PinjamanSKUM');
+      if (!sheet) {
+        sheet = ss.insertSheet('PinjamanSKUM');
+        sheet.appendRow(['ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah', 'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At']);
+      }
+      var rowValues = [
+        record.id || ('pinjam-' + Date.now()),
+        record.tanggal || '',
+        record.nomorPerkara || 'Kepaniteraan Umum',
+        record.peminjam || '',
+        Number(record.jumlah) || 0,
+        record.keterangan || '',
+        record.status || 'BELUM_DIBAYAR',
+        record.tanggalBayar || '',
+        record.skumPengeluaranId || '',
+        record.skumPengembalianId || '',
+        record.createdAt || new Date().toISOString()
+      ];
+
+      var dataRows = sheet.getDataRange().getValues();
+      var rowIndex = -1;
+      var targetId = String(record.id || '').trim();
+
+      if (dataRows.length > 1) {
+        for (var p = 1; p < dataRows.length; p++) {
+          var rowId = String(dataRows[p][0] || '').trim();
+          if (targetId && rowId === targetId) {
+            rowIndex = p + 1;
+            break;
+          }
+        }
+      }
+
+      if (rowIndex > 1) {
+        sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+      } else {
+        sheet.appendRow(rowValues);
+      }
+    } else if (action === 'delete_pinjaman_skum') {
+      var sheet = ss.getSheetByName('PinjamanSKUM');
+      if (sheet) {
+        var dataRows = sheet.getDataRange().getValues();
+        var targetId = String(record.id || '').trim();
+        for (var q = 1; q < dataRows.length; q++) {
+          var rowId = String(dataRows[q][0] || '').trim();
+          if (targetId && rowId === targetId) {
+            sheet.deleteRow(q + 1);
+            break;
+          }
+        }
+      }
     }
 
     return ContentService.createTextOutput(JSON.stringify({ status: 'success' }))
@@ -420,6 +512,24 @@ function writeJurnalSkumToSheet(ss, records) {
     sheet.appendRow([
       r.id, r.tanggal, r.nomorPerkara, r.uraian, r.penerimaan || 0,
       r.pengeluaran || 0, r.kategori, r.keterangan || '', r.createdAt
+    ]);
+  });
+}
+
+function writePinjamanSkumToSheet(ss, records) {
+  var sheet = ss.getSheetByName('PinjamanSKUM');
+  if (!sheet) return;
+  sheet.clearContents();
+  sheet.appendRow([
+    'ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah',
+    'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At'
+  ]);
+  sheet.getRange('A1:K1').setFontWeight('bold').setBackground('#fde68a');
+  records.forEach(function(r) {
+    sheet.appendRow([
+      r.id, r.tanggal, r.nomorPerkara, r.peminjam, r.jumlah || 0,
+      r.keterangan || '', r.status || 'BELUM_DIBAYAR', r.tanggalBayar || '',
+      r.skumPengeluaranId || '', r.skumPengembalianId || '', r.createdAt || ''
     ]);
   });
 }`;

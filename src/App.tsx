@@ -73,28 +73,52 @@ export default function App() {
       let peng = Number(r.pengeluaran) || 0;
       let kat = r.kategori || 'Panggilan';
 
+      const isPengembalianPinjaman = uraianLower.includes('pengembalian pinjaman') || 
+                                     uraianLower.includes('pelunasan pinjaman') ||
+                                     uraianLower.includes('pengembalian saldo skum');
+
+      const isPeminjamanPinjaman = (kat === 'Pinjaman' && !isPengembalianPinjaman) ||
+                                   uraianLower.includes('peminjaman saldo') || 
+                                   uraianLower.includes('pinjam saldo');
+
       const isExplicitPanjarAwal = uraianLower.includes('panjar awal') || 
                                    uraianLower.includes('penerimaan panjar') || 
                                    uraianLower.includes('tambah panjar') || 
-                                   uraianLower.includes('setoran panjar');
+                                   uraianLower.includes('setoran panjar') ||
+                                   uraianLower.includes('penambahan panjar');
 
-      const isPinjam = kat === 'Pinjaman' || uraianLower.includes('peminjaman saldo') || uraianLower.includes('pinjam saldo');
       const isSisaPanjar = kat === 'Sisa Panjar' || uraianLower.includes('sisa panjar') || uraianLower.includes('pengembalian sisa');
+      const isJurnalExecutionExpense = uraianLower.startsWith('pencatatan jurnal:');
 
-      if (isExplicitPanjarAwal || (kat === 'Panjar' && !isPinjam && !isSisaPanjar && !uraianLower.includes('pencatatan jurnal:'))) {
-        // Penerimaan / Debet
-        const val = pen > 0 ? pen : peng;
+      // Determine Debet (Penerimaan/Income) vs Kredit (Pengeluaran/Expense)
+      let isDebet = false;
+      if (isPengembalianPinjaman || isExplicitPanjarAwal) {
+        isDebet = true;
+      } else if (isPeminjamanPinjaman || isJurnalExecutionExpense || isSisaPanjar || 
+                 kat === 'Panggilan' || kat === 'ATK' || kat === 'Meterai' || kat === 'Redaksi' || kat === 'Proses') {
+        isDebet = false;
+      } else if (kat === 'Panjar') {
+        isDebet = true;
+      } else {
+        isDebet = pen > 0 && peng === 0;
+      }
+
+      const totalVal = (pen > 0 ? pen : 0) + (peng > 0 ? peng : 0);
+      const val = totalVal > 0 ? (pen > 0 && peng > 0 ? (isDebet ? pen : peng) : totalVal) : 0;
+
+      if (isDebet) {
         pen = val;
         peng = 0;
-        kat = 'Panjar';
+        if (isPengembalianPinjaman) kat = 'Pinjaman';
+        else kat = 'Panjar';
       } else {
-        // Pengeluaran / Kredit (Biaya Panggilan, ATK, Meterai, Redaksi, Pinjaman, Sisa Panjar, Proses)
-        const val = peng > 0 ? peng : pen;
         pen = 0;
         peng = val;
-        if (isPinjam) kat = 'Pinjaman';
-        else if (isSisaPanjar) kat = 'Sisa Panjar';
-        else if (kat === 'Panjar') {
+        if (isPeminjamanPinjaman) {
+          kat = 'Pinjaman';
+        } else if (isSisaPanjar) {
+          kat = 'Sisa Panjar';
+        } else if (kat === 'Panjar') {
           if (uraianLower.includes('panggilan')) kat = 'Panggilan';
           else if (uraianLower.includes('meterai')) kat = 'Meterai';
           else if (uraianLower.includes('redaksi')) kat = 'Redaksi';
@@ -139,22 +163,37 @@ export default function App() {
         caseSkumLogs = cleanSkumList.filter(r => r.nomorPerkara && r.nomorPerkara.trim().toLowerCase() === normCaseNum);
       }
 
-      const totalPenerimaan = caseSkumLogs.reduce((sum, r) => sum + (Number(r.penerimaan) || 0), 0);
-      const totalPengeluaran = caseSkumLogs.reduce((sum, r) => sum + (Number(r.pengeluaran) || 0), 0);
+      // 1. Separate income vs expenses for this case
+      let panjarAwalIncomeTotal = 0;
+      let pinjamanRepaymentTotal = 0;
+      let totalPengeluaran = 0;
 
-      const hasPanjarAwalLog = caseSkumLogs.some(r =>
-        (r.kategori === 'Panjar' && (Number(r.penerimaan) || 0) > 0) ||
-        (r.uraian && r.uraian.toLowerCase().includes('panjar awal'))
-      );
+      caseSkumLogs.forEach(r => {
+        const pen = Number(r.penerimaan) || 0;
+        const peng = Number(r.pengeluaran) || 0;
+        const uraianLower = (r.uraian || '').toLowerCase();
 
-      let effectivePanjar = c.panjarAwal || 0;
-      if (hasPanjarAwalLog && totalPenerimaan > 0) {
-        effectivePanjar = totalPenerimaan;
-      } else if (totalPenerimaan > 0) {
-        effectivePanjar = Math.max(c.panjarAwal || 0, totalPenerimaan);
-      } else if (effectivePanjar === 0 && (c.saldoPerkara || 0) > 0) {
-        effectivePanjar = (c.saldoPerkara || 0) + totalPengeluaran;
+        if (r.kategori === 'Pinjaman' && (uraianLower.includes('pengembalian') || uraianLower.includes('pelunasan'))) {
+          pinjamanRepaymentTotal += pen;
+        } else if (pen > 0 && (r.kategori === 'Panjar' || uraianLower.includes('panjar') || uraianLower.includes('setoran'))) {
+          panjarAwalIncomeTotal += pen;
+        } else if (pen > 0) {
+          panjarAwalIncomeTotal += pen;
+        }
+
+        if (peng > 0) {
+          totalPengeluaran += peng;
+        }
+      });
+
+      let basePanjar = c.panjarAwal || 0;
+      if (panjarAwalIncomeTotal > 0) {
+        basePanjar = panjarAwalIncomeTotal;
+      } else if (basePanjar === 0 && (c.saldoPerkara || 0) > 0) {
+        basePanjar = (c.saldoPerkara || 0) + totalPengeluaran;
       }
+
+      const effectivePanjar = basePanjar + pinjamanRepaymentTotal;
 
       const hasSisaPanjarLog = caseSkumLogs.some(r =>
         r.kategori === 'Sisa Panjar' ||
@@ -274,6 +313,17 @@ export default function App() {
             if (activeJurnal.length > 0) {
               setJurnalSkumRecords(sortSkumRecords(activeJurnal));
               StorageService.saveJurnalSkumRecords(sortSkumRecords(activeJurnal));
+            }
+
+            if (appsScriptData.pinjamanSkum && appsScriptData.pinjamanSkum.length > 0) {
+              setPinjamanSkumRecords(appsScriptData.pinjamanSkum);
+              StorageService.savePinjamanSkumRecords(appsScriptData.pinjamanSkum);
+            } else if (activeJurnal.length > 0) {
+              const reconstructedPinjaman = SyncService.reconstructPinjamanFromJurnal(activeJurnal);
+              if (reconstructedPinjaman.length > 0) {
+                setPinjamanSkumRecords(reconstructedPinjaman);
+                StorageService.savePinjamanSkumRecords(reconstructedPinjaman);
+              }
             }
 
             setCacheMeta(StorageService.getCacheMeta());
@@ -751,6 +801,16 @@ export default function App() {
     const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
     updateCasesState(updatedCases);
 
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.postToWebhook(webhook, 'add_pinjaman_skum', newPinjaman);
+      SyncService.postToWebhook(webhook, 'add_jurnal_skum', newSkumRecord);
+      const targetCase = updatedCases.find(c => c.nomorPerkara && c.nomorPerkara.trim().toLowerCase() === newPinjaman.nomorPerkara.trim().toLowerCase());
+      if (targetCase) {
+        SyncService.postToWebhook(webhook, 'update_case', targetCase);
+      }
+    }
+
     addNotification(
       '⚠️ Peminjaman Saldo SKUM',
       `Peminjaman saldo SKUM sebesar Rp ${data.jumlah.toLocaleString('id-ID')} oleh ${data.peminjam} telah dicatat dan memotong saldo sementara.`,
@@ -767,14 +827,16 @@ export default function App() {
     const now = Date.now();
     const skumKembaliId = `skum-kembali-${now}`;
 
+    let updatedTargetPinjaman: PinjamanSkumRecord | null = null;
     const updatedPinjaman = pinjamanSkumRecords.map(p => {
       if (p.id === pinjamanId) {
-        return {
+        updatedTargetPinjaman = {
           ...p,
           status: 'SUDAH_DIBAYAR' as const,
           tanggalBayar: today,
           skumPengembalianId: skumKembaliId
         };
+        return updatedTargetPinjaman;
       }
       return p;
     });
@@ -798,6 +860,18 @@ export default function App() {
     const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
     updateCasesState(updatedCases);
 
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      if (updatedTargetPinjaman) {
+        SyncService.postToWebhook(webhook, 'update_pinjaman_skum', updatedTargetPinjaman);
+      }
+      SyncService.postToWebhook(webhook, 'add_jurnal_skum', newSkumRecord);
+      const targetCase = updatedCases.find(c => c.nomorPerkara && c.nomorPerkara.trim().toLowerCase() === target.nomorPerkara.trim().toLowerCase());
+      if (targetCase) {
+        SyncService.postToWebhook(webhook, 'update_case', targetCase);
+      }
+    }
+
     addNotification(
       '✅ Pelunasan Pinjaman SKUM',
       `Pinjaman SKUM sebesar Rp ${target.jumlah.toLocaleString('id-ID')} (${target.peminjam}) telah DIBAYAR & DIKEMBALIKAN ke Saldo SKUM.`,
@@ -820,6 +894,21 @@ export default function App() {
 
     const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
     updateCasesState(updatedCases);
+
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.postToWebhook(webhook, 'delete_pinjaman_skum', target);
+      if (target.skumPengeluaranId) {
+        SyncService.postToWebhook(webhook, 'delete_jurnal_skum', { id: target.skumPengeluaranId, nomorPerkara: target.nomorPerkara });
+      }
+      if (target.skumPengembalianId) {
+        SyncService.postToWebhook(webhook, 'delete_jurnal_skum', { id: target.skumPengembalianId, nomorPerkara: target.nomorPerkara });
+      }
+      const targetCase = updatedCases.find(c => c.nomorPerkara && c.nomorPerkara.trim().toLowerCase() === target.nomorPerkara.trim().toLowerCase());
+      if (targetCase) {
+        SyncService.postToWebhook(webhook, 'update_case', targetCase);
+      }
+    }
 
     addNotification(
       'Catatan Pinjaman Dihapus',
