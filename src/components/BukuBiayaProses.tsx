@@ -76,8 +76,52 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
   theme = 'light'
 }) => {
   const isLight = theme === 'light';
-  const [selectedMonth, setSelectedMonth] = useState<string>('JULI'); // Default current month July 2026
-  const [selectedYear, setSelectedYear] = useState<string>('2026');
+
+  // Dynamic Current Month & Year
+  const currentMonthIdx = new Date().getMonth();
+  const currentMonthName = MONTH_NAMES[currentMonthIdx] || 'JANUARI';
+  const currentYearStr = new Date().getFullYear().toString();
+
+  // Initialize selectedMonth with saved preference or default to Current Month
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('buku_biaya_default_filter_mode');
+      if (saved === 'ALL') return 'ALL';
+      if (saved && MONTH_NAMES.includes(saved)) return saved;
+    } catch (e) {
+      // ignore
+    }
+    return currentMonthName;
+  });
+
+  const [selectedYear, setSelectedYear] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('buku_biaya_default_year');
+      if (saved) return saved;
+    } catch (e) {
+      // ignore
+    }
+    return currentYearStr;
+  });
+
+  const handleSelectMonth = (month: string) => {
+    setSelectedMonth(month);
+    try {
+      localStorage.setItem('buku_biaya_default_filter_mode', month);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleSelectYear = (year: string) => {
+    setSelectedYear(year);
+    try {
+      localStorage.setItem('buku_biaya_default_year', year);
+    } catch (e) {
+      // ignore
+    }
+  };
+
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isPrintJurnalModalOpen, setIsPrintJurnalModalOpen] = useState<boolean>(false);
@@ -789,57 +833,110 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
       </details>
 
       {/* MONTHLY REKAP SELECTOR & SEARCH BAR */}
-      <div className={`border rounded-2xl p-4 flex flex-col lg:flex-row items-center justify-between gap-4 transition-colors ${
+      <div className={`border rounded-2xl p-4 flex flex-col gap-3 transition-colors ${
         isLight ? 'bg-white border-slate-200 shadow-xs' : 'bg-slate-900 border-slate-800 shadow-lg'
       }`}>
-        
-        {/* Month Pills */}
-        <div className="flex items-center space-x-1 overflow-x-auto w-full lg:w-auto pb-2 lg:pb-0 scrollbar-thin">
-          <button
-            onClick={() => setSelectedMonth('ALL')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-              selectedMonth === 'ALL'
-                ? 'bg-amber-600 text-white shadow-sm'
-                : isLight 
-                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-            }`}
-          >
-            Semua Bulan
-          </button>
-          {MONTH_NAMES.map(m => (
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Quick Buttons & Year Selector */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick Toggle: Bulan Sekarang */}
             <button
-              key={m}
-              onClick={() => setSelectedMonth(m)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${
-                selectedMonth === m
-                  ? 'bg-amber-600 text-white shadow-sm'
-                  : isLight 
-                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
+              onClick={() => handleSelectMonth(currentMonthName)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center space-x-1.5 transition-all shadow-xs ${
+                selectedMonth === currentMonthName
+                  ? 'bg-amber-600 text-white ring-2 ring-amber-400'
+                  : isLight
+                    ? 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                    : 'bg-amber-950/50 text-amber-300 border border-amber-800 hover:bg-amber-900/60'
+              }`}
+              title="Tampilkan data transaksi bulan berjalan saat ini"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Bulan Sekarang ({currentMonthName})</span>
+              {selectedMonth === currentMonthName && (
+                <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+              )}
+            </button>
+
+            {/* Quick Toggle: Semua Bulan */}
+            <button
+              onClick={() => handleSelectMonth('ALL')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center space-x-1.5 transition-all ${
+                selectedMonth === 'ALL'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : isLight
+                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
+              title="Tampilkan seluruh transaksi sepanjang tahun"
             >
-              {m}
+              <span>Semua Bulan</span>
             </button>
-          ))}
+
+            {/* Year Selector */}
+            <div className="flex items-center space-x-1.5 ml-1">
+              <span className={`text-[11px] font-bold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Tahun:</span>
+              <select
+                value={selectedYear}
+                onChange={(e) => handleSelectYear(e.target.value)}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+                  isLight ? 'bg-slate-50 border-slate-300 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-200'
+                }`}
+              >
+                <option value="ALL">Semua Tahun</option>
+                <option value="2026">2026</option>
+                <option value="2025">2025</option>
+                <option value="2024">2024</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Search Input */}
+          <div className="relative w-full lg:w-72">
+            <Search className={`w-4 h-4 absolute left-3 top-2.5 ${isLight ? 'text-slate-400' : 'text-slate-400'}`} />
+            <input
+              type="text"
+              placeholder="Cari uraian, nomor perkara..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`w-full border rounded-xl pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors ${
+                isLight 
+                  ? 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400' 
+                  : 'bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500'
+              }`}
+            />
+          </div>
         </div>
 
-        {/* Search Input */}
-        <div className="relative w-full lg:w-72">
-          <Search className={`w-4 h-4 absolute left-3 top-2.5 ${isLight ? 'text-slate-400' : 'text-slate-400'}`} />
-          <input
-            type="text"
-            placeholder="Cari uraian, nomor perkara..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className={`w-full border rounded-xl pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors ${
-              isLight 
-                ? 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400' 
-                : 'bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500'
-            }`}
-          />
+        {/* Month Pills Row */}
+        <div className="flex items-center space-x-1 overflow-x-auto w-full pt-1 pb-1 scrollbar-thin">
+          {MONTH_NAMES.map(m => {
+            const isCurrent = m === currentMonthName;
+            const isSelected = selectedMonth === m;
+            return (
+              <button
+                key={m}
+                onClick={() => handleSelectMonth(m)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center space-x-1 ${
+                  isSelected
+                    ? 'bg-amber-600 text-white shadow-sm font-bold ring-1 ring-amber-400'
+                    : isCurrent
+                      ? isLight
+                        ? 'bg-amber-100/70 text-amber-900 border border-amber-300 hover:bg-amber-200/70'
+                        : 'bg-amber-950/40 text-amber-300 border border-amber-800/80 hover:bg-amber-900/60'
+                      : isLight 
+                        ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' 
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>{m}</span>
+                {isCurrent && !isSelected && (
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500 text-white font-black">INI</span>
+                )}
+              </button>
+            );
+          })}
         </div>
-
       </div>
 
       {/* LOG TRANSAKSI TABLE (DISPLAY VIEW) */}

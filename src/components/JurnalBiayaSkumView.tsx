@@ -21,7 +21,9 @@ import {
   HandCoins,
   Clock,
   RotateCcw,
-  Receipt
+  Receipt,
+  Palette,
+  Check
 } from 'lucide-react';
 
 interface JurnalBiayaSkumViewProps {
@@ -59,6 +61,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
   const [filterBulan, setFilterBulan] = useState<string>('ALL');
   const [filterTahun, setFilterTahun] = useState<string>(new Date().getFullYear().toString());
+  const [filterWarna, setFilterWarna] = useState<string>('ALL');
   const [sortDirection, setSortDirection] = useState<'ASC' | 'DESC'>('ASC');
 
   // Modal Pinjaman Saldo SKUM
@@ -78,6 +81,12 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const totalUnpaidAmount = useMemo(() => {
     return unpaidLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
   }, [unpaidLoans]);
+
+  // Color Counts for Statistics & Quick Filters
+  const countHijau = useMemo(() => records.filter(r => r.warnaBaris === 'hijau').length, [records]);
+  const countMerah = useMemo(() => records.filter(r => r.warnaBaris === 'merah').length, [records]);
+  const countOranye = useMemo(() => records.filter(r => r.warnaBaris === 'oranye').length, [records]);
+  const countDefault = useMemo(() => records.filter(r => !r.warnaBaris || r.warnaBaris === 'default').length, [records]);
 
   // Available unique case numbers for dropdown filter
   const availableNomorPerkara = useMemo(() => {
@@ -104,6 +113,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [formNominal, setFormNominal] = useState<number>(0);
   const [formKategori, setFormKategori] = useState<JurnalBiayaSkumRecord['kategori']>('Panggilan');
   const [formKeterangan, setFormKeterangan] = useState('');
+  const [formWarnaBaris, setFormWarnaBaris] = useState<'hijau' | 'merah' | 'oranye' | 'default'>('default');
 
   // Modal Edit SKUM
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -115,6 +125,16 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [editNominal, setEditNominal] = useState<number>(0);
   const [editKategori, setEditKategori] = useState<JurnalBiayaSkumRecord['kategori']>('Panggilan');
   const [editKeterangan, setEditKeterangan] = useState('');
+  const [editWarnaBaris, setEditWarnaBaris] = useState<'hijau' | 'merah' | 'oranye' | 'default'>('default');
+
+  // Quick set row color
+  const handleQuickSetColor = (record: JurnalBiayaSkumRecord, color: 'hijau' | 'merah' | 'oranye' | 'default') => {
+    const nextColor = record.warnaBaris === color && color !== 'default' ? 'default' : color;
+    onUpdateRecord({
+      ...record,
+      warnaBaris: nextColor
+    });
+  };
 
   // SKUM Minus Analysis Modal State
   const [isSkumMinusModalOpen, setIsSkumMinusModalOpen] = useState(false);
@@ -134,6 +154,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     }
     setEditKategori(record.kategori || 'Panggilan');
     setEditKeterangan(record.keterangan || '');
+    setEditWarnaBaris(record.warnaBaris || 'default');
     setIsEditModalOpen(true);
   };
 
@@ -155,7 +176,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       penerimaan: isKredit ? 0 : editNominal,
       pengeluaran: isKredit ? editNominal : 0,
       kategori: finalKategori,
-      keterangan: editKeterangan
+      keterangan: editKeterangan,
+      warnaBaris: editWarnaBaris
     });
 
     setIsEditModalOpen(false);
@@ -232,7 +254,11 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           }
         }
 
-        return matchQuery && matchNomorPerkara && matchCategory && matchMonthYear;
+        const matchWarna = 
+          filterWarna === 'ALL' ||
+          (filterWarna === 'default' ? (!r.warnaBaris || r.warnaBaris === 'default') : r.warnaBaris === filterWarna);
+
+        return matchQuery && matchNomorPerkara && matchCategory && matchMonthYear && matchWarna;
       })
       .sort((a, b) => {
         const dateA = a.tanggal || '';
@@ -244,7 +270,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
         const createdB = b.createdAt || '';
         return sortDirection === 'ASC' ? createdA.localeCompare(createdB) : createdB.localeCompare(createdA);
       });
-  }, [records, searchQuery, filterNomorPerkara, filterCategory, filterBulan, filterTahun, sortDirection]);
+  }, [records, searchQuery, filterNomorPerkara, filterCategory, filterBulan, filterTahun, filterWarna, sortDirection]);
 
   // Calculate totals
   const totalDebet = filteredRecords.reduce((acc, r) => acc + (r.penerimaan || 0), 0);
@@ -287,13 +313,15 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       penerimaan: isKredit ? 0 : formNominal,
       pengeluaran: isKredit ? formNominal : 0,
       kategori: finalKategori,
-      keterangan: formKeterangan || 'Log Transaksi Manual Jurnal SKUM'
+      keterangan: formKeterangan || 'Log Transaksi Manual Jurnal SKUM',
+      warnaBaris: formWarnaBaris
     });
 
     setIsAddModalOpen(false);
     setFormUraian('');
     setFormNominal(0);
     setFormKeterangan('');
+    setFormWarnaBaris('default');
   };
 
   const handleFormSubmitPinjaman = (e: React.FormEvent) => {
@@ -343,6 +371,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           .font-bold { font-weight: bold; }
           .footer { margin-top: 40px; display: flex; justify-content: space-between; page-break-inside: avoid; }
           .sig-box { text-align: center; width: 230px; }
+          .row-hijau { background-color: #ecfdf5 !important; }
+          .row-merah { background-color: #fff1f2 !important; }
+          .row-oranye { background-color: #fffbeb !important; }
         </style>
       </head>
       <body>
@@ -363,13 +394,17 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               <th style="width: 110px;">Debet / Panjar (Rp)</th>
               <th style="width: 110px;">Kredit / Biaya (Rp)</th>
               <th style="width: 90px;">Kategori</th>
+              <th style="width: 80px;">Status Setor</th>
             </tr>
           </thead>
           <tbody>
             ${filteredRecords.length === 0 ? `
-              <tr><td colspan="7" class="text-center" style="padding: 20px;">Belum ada data jurnal SKUM perkara.</td></tr>
-            ` : filteredRecords.map((r, i) => `
-              <tr>
+              <tr><td colspan="8" class="text-center" style="padding: 20px;">Belum ada data jurnal SKUM perkara.</td></tr>
+            ` : filteredRecords.map((r, i) => {
+              const rowClass = r.warnaBaris === 'hijau' ? 'row-hijau' : r.warnaBaris === 'merah' ? 'row-merah' : r.warnaBaris === 'oranye' ? 'row-oranye' : '';
+              const statusText = r.warnaBaris === 'hijau' ? 'Disetor (Hijau)' : r.warnaBaris === 'merah' ? 'Perhatian (Merah)' : r.warnaBaris === 'oranye' ? 'Proses (Oranye)' : '-';
+              return `
+              <tr class="${rowClass}">
                 <td class="text-center">${i + 1}</td>
                 <td class="text-center">${r.tanggal || '-'}</td>
                 <td class="font-bold">${r.nomorPerkara}</td>
@@ -377,19 +412,20 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                 <td class="text-right">${r.penerimaan > 0 ? 'Rp ' + r.penerimaan.toLocaleString('id-ID') : '-'}</td>
                 <td class="text-right">${r.pengeluaran > 0 ? 'Rp ' + r.pengeluaran.toLocaleString('id-ID') : '-'}</td>
                 <td class="text-center">${r.kategori}</td>
+                <td class="text-center" style="font-weight: bold;">${statusText}</td>
               </tr>
-            `).join('')}
+            `;}).join('')}
           </tbody>
           <tfoot>
             <tr style="background-color: #f9f9f9; font-weight: bold;">
               <td colspan="4" class="text-right">TOTAL (Rp):</td>
               <td class="text-right">Rp ${totalDebet.toLocaleString('id-ID')}</td>
               <td class="text-right">Rp ${totalKredit.toLocaleString('id-ID')}</td>
-              <td></td>
+              <td colspan="2"></td>
             </tr>
             <tr style="background-color: #e0f2fe; font-weight: bold;">
               <td colspan="4" class="text-right">SALDO TERSISA SKUM PERKARA:</td>
-              <td colspan="3" class="text-center" style="font-size: 11px;">Rp ${saldoSkum.toLocaleString('id-ID')}</td>
+              <td colspan="4" class="text-center" style="font-size: 11px;">Rp ${saldoSkum.toLocaleString('id-ID')}</td>
             </tr>
           </tfoot>
         </table>
@@ -728,28 +764,93 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       )}
 
       {/* Filter & Search Bar */}
-      <div className={`p-4 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-3 ${
-        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+      <div className={`p-4 rounded-2xl border flex flex-col gap-3 ${
+        isLight ? 'bg-white border-slate-200 shadow-xs' : 'bg-slate-900 border-slate-800 shadow-md'
       }`}>
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Cari nomor perkara, uraian SKUM..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className={`w-full pl-9 pr-4 py-2 rounded-xl text-xs border focus:outline-none focus:ring-2 focus:ring-sky-500 ${
-              isLight ? 'bg-slate-50 border-slate-300 text-slate-800' : 'bg-slate-800 border-slate-700 text-white'
-            }`}
-          />
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          <div className="relative w-full md:w-80">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Cari nomor perkara, uraian SKUM..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`w-full pl-9 pr-4 py-2 rounded-xl text-xs border focus:outline-none focus:ring-2 focus:ring-sky-500 ${
+                isLight ? 'bg-slate-50 border-slate-300 text-slate-800' : 'bg-slate-800 border-slate-700 text-white'
+              }`}
+            />
+          </div>
+
+          {/* Quick Color Filter Chips */}
+          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-thin">
+            <button
+              onClick={() => setFilterWarna('ALL')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 ${
+                filterWarna === 'ALL'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              <span>Semua</span>
+              <span className="text-[10px] opacity-80 font-mono">({records.length})</span>
+            </button>
+
+            <button
+              onClick={() => setFilterWarna(filterWarna === 'hijau' ? 'ALL' : 'hijau')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 border ${
+                filterWarna === 'hijau'
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-300'
+                  : isLight
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-emerald-950/40 text-emerald-300 border-emerald-800 hover:bg-emerald-900/50'
+              }`}
+              title="Tampilkan transaksi yang sudah disetor (Warna Hijau)"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>Sudah Disetor</span>
+              <span className="text-[10px] font-mono font-black">({countHijau})</span>
+            </button>
+
+            <button
+              onClick={() => setFilterWarna(filterWarna === 'merah' ? 'ALL' : 'merah')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 border ${
+                filterWarna === 'merah'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-300'
+                  : isLight
+                    ? 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
+                    : 'bg-rose-950/40 text-rose-300 border-rose-800 hover:bg-rose-900/50'
+              }`}
+              title="Tampilkan transaksi perhatian / belum disetor (Warna Merah)"
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+              <span>Perhatian</span>
+              <span className="text-[10px] font-mono font-black">({countMerah})</span>
+            </button>
+
+            <button
+              onClick={() => setFilterWarna(filterWarna === 'oranye' ? 'ALL' : 'oranye')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 border ${
+                filterWarna === 'oranye'
+                  ? 'bg-amber-600 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
+                  : isLight
+                    ? 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                    : 'bg-amber-950/40 text-amber-300 border-amber-800 hover:bg-amber-900/50'
+              }`}
+              title="Tampilkan transaksi dalam proses (Warna Oranye)"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span>Proses</span>
+              <span className="text-[10px] font-mono font-black">({countOranye})</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full pt-1 border-t border-slate-100 dark:border-slate-800/80">
           {/* Nomor Perkara Filter */}
           <select
             value={filterNomorPerkara}
             onChange={(e) => setFilterNomorPerkara(e.target.value)}
-            className={`px-3 py-2 rounded-xl text-xs border font-semibold ${
+            className={`px-3 py-1.5 rounded-xl text-xs border font-semibold ${
               isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-200'
             }`}
           >
@@ -765,7 +866,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
-            className={`px-3 py-2 rounded-xl text-xs border font-semibold ${
+            className={`px-3 py-1.5 rounded-xl text-xs border font-semibold ${
               isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-200'
             }`}
           >
@@ -779,11 +880,26 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             <option value="Sisa Panjar">Pengembalian Sisa Panjar</option>
           </select>
 
+          {/* Filter Status Setor / Warna */}
+          <select
+            value={filterWarna}
+            onChange={(e) => setFilterWarna(e.target.value)}
+            className={`px-3 py-1.5 rounded-xl text-xs border font-bold ${
+              isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-200'
+            }`}
+          >
+            <option value="ALL">🎨 Semua Warna & Status</option>
+            <option value="hijau">🟢 Hijau (Sudah Disetor)</option>
+            <option value="merah">🔴 Merah (Perhatian / Belum Disetor)</option>
+            <option value="oranye">🟠 Oranye (Dalam Proses)</option>
+            <option value="default">⚪ Standar (Tanpa Warna)</option>
+          </select>
+
           {/* Bulan Filter */}
           <select
             value={filterBulan}
             onChange={(e) => setFilterBulan(e.target.value)}
-            className={`px-3 py-2 rounded-xl text-xs border font-semibold ${
+            className={`px-3 py-1.5 rounded-xl text-xs border font-semibold ${
               isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-200'
             }`}
           >
@@ -799,7 +915,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           <select
             value={filterTahun}
             onChange={(e) => setFilterTahun(e.target.value)}
-            className={`px-3 py-2 rounded-xl text-xs border font-semibold ${
+            className={`px-3 py-1.5 rounded-xl text-xs border font-semibold ${
               isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-200'
             }`}
           >
@@ -813,7 +929,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           <select
             value={sortDirection}
             onChange={(e) => setSortDirection(e.target.value as 'ASC' | 'DESC')}
-            className={`px-3 py-2 rounded-xl text-xs border font-semibold ${
+            className={`px-3 py-1.5 rounded-xl text-xs border font-semibold ${
               isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'bg-slate-800 border-slate-700 text-slate-200'
             }`}
           >
@@ -835,18 +951,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               }`}>
                 <th className="p-3 text-center w-10">No</th>
                 <th className="p-3 w-28">Tanggal</th>
-                <th className="p-3 w-48">Nomor Perkara</th>
+                <th className="p-3 w-44">Nomor Perkara</th>
                 <th className="p-3">Uraian Transaksi SKUM</th>
                 <th className="p-3 text-right w-32">Debet (Panjar)</th>
                 <th className="p-3 text-right w-32">Kredit (Pengeluaran)</th>
-                <th className="p-3 text-center w-28">Kategori</th>
-                <th className="p-3 text-center w-16">Aksi</th>
+                <th className="p-3 text-center w-36">Kategori & Status</th>
+                <th className="p-3 text-center w-36">Pilih Warna Baris</th>
+                <th className="p-3 text-center w-20">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-sans">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-12 text-center text-slate-400">
+                  <td colSpan={9} className="p-12 text-center text-slate-400">
                     <div className="max-w-xs mx-auto space-y-2">
                       <BookOpen className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
                       <p className="font-bold text-sm text-slate-600 dark:text-slate-300">Belum Ada Data Jurnal SKUM</p>
@@ -857,59 +974,148 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((r, idx) => (
-                  <tr 
-                    key={`${r.id}-${idx}`} 
-                    className={`transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
-                      r.kategori === 'ATK' ? 'bg-amber-50/40 dark:bg-amber-950/10' : ''
-                    }`}
-                  >
-                    <td className="p-3 text-center font-bold text-slate-400">{idx + 1}</td>
-                    <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{r.tanggal || '-'}</td>
-                    <td className="p-3 font-mono font-bold text-sky-700 dark:text-sky-400">
-                      {r.nomorPerkara}
-                    </td>
-                    <td className="p-3">
-                      <div className="font-semibold text-slate-800 dark:text-slate-200">{r.uraian}</div>
-                      {r.keterangan && (
-                        <div className="text-[10px] text-slate-400 mt-0.5">{r.keterangan}</div>
-                      )}
-                    </td>
-                    <td className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      {r.penerimaan > 0 ? `Rp ${r.penerimaan.toLocaleString('id-ID')}` : '-'}
-                    </td>
-                    <td className="p-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
-                      {r.pengeluaran > 0 ? `Rp ${r.pengeluaran.toLocaleString('id-ID')}` : '-'}
-                    </td>
-                    <td className="p-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        r.kategori === 'Panjar' 
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
-                          : r.kategori === 'ATK'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-                      }`}>
-                        {r.kategori}
-                      </span>
-                    </td>
-                    <td className="p-3 text-center space-x-1">
-                      <button
-                        onClick={() => handleStartEdit(r)}
-                        className="p-1.5 text-slate-400 hover:text-sky-600 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/40 transition-colors"
-                        title="Edit data log SKUM ini"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => onDeleteRecord(r.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                        title="Hapus baris log ini"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredRecords.map((r, idx) => {
+                  const warna = r.warnaBaris || 'default';
+                  let rowColorClass = '';
+                  if (warna === 'hijau') {
+                    rowColorClass = isLight 
+                      ? 'bg-emerald-50/80 hover:bg-emerald-100/90 border-l-4 border-l-emerald-600' 
+                      : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-l-4 border-l-emerald-500';
+                  } else if (warna === 'merah') {
+                    rowColorClass = isLight 
+                      ? 'bg-rose-50/80 hover:bg-rose-100/90 border-l-4 border-l-rose-600' 
+                      : 'bg-rose-950/40 hover:bg-rose-900/50 border-l-4 border-l-rose-500';
+                  } else if (warna === 'oranye') {
+                    rowColorClass = isLight 
+                      ? 'bg-amber-50/80 hover:bg-amber-100/90 border-l-4 border-l-amber-600' 
+                      : 'bg-amber-950/40 hover:bg-amber-900/50 border-l-4 border-l-amber-500';
+                  } else {
+                    rowColorClass = isLight
+                      ? 'hover:bg-slate-50 border-l-4 border-l-transparent'
+                      : 'hover:bg-slate-800/50 border-l-4 border-l-transparent';
+                  }
+
+                  return (
+                    <tr 
+                      key={`${r.id}-${idx}`} 
+                      className={`transition-colors ${rowColorClass}`}
+                    >
+                      <td className="p-3 text-center font-bold text-slate-400">{idx + 1}</td>
+                      <td className="p-3 font-mono font-medium text-slate-700 dark:text-slate-300">{r.tanggal || '-'}</td>
+                      <td className="p-3 font-mono font-extrabold text-sky-800 dark:text-sky-300">
+                        {r.nomorPerkara}
+                      </td>
+                      <td className="p-3">
+                        <div className="font-bold text-slate-900 dark:text-slate-100 text-xs">{r.uraian}</div>
+                        {r.keterangan && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">{r.keterangan}</div>
+                        )}
+                      </td>
+                      <td className="p-3 text-right font-mono font-black text-emerald-700 dark:text-emerald-300">
+                        {r.penerimaan > 0 ? `Rp ${r.penerimaan.toLocaleString('id-ID')}` : '-'}
+                      </td>
+                      <td className="p-3 text-right font-mono font-black text-rose-700 dark:text-rose-300">
+                        {r.pengeluaran > 0 ? `Rp ${r.pengeluaran.toLocaleString('id-ID')}` : '-'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            r.kategori === 'Panjar' 
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800' 
+                              : r.kategori === 'ATK'
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                          }`}>
+                            {r.kategori}
+                          </span>
+                          {warna === 'hijau' && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-600 text-white flex items-center gap-0.5 shadow-xs">
+                              <Check className="w-2.5 h-2.5" /> Sudah Disetor
+                            </span>
+                          )}
+                          {warna === 'merah' && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-600 text-white flex items-center gap-0.5 shadow-xs">
+                              🔴 Perhatian
+                            </span>
+                          )}
+                          {warna === 'oranye' && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-600 text-white flex items-center gap-0.5 shadow-xs">
+                              🟠 Proses
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 text-center">
+                        {/* Interactive Row Color Palette */}
+                        <div className="inline-flex items-center p-1 rounded-xl border bg-white/80 dark:bg-slate-800/80 shadow-xs space-x-1">
+                          {/* Hijau / Sudah Disetor */}
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSetColor(r, 'hijau')}
+                            className={`w-5 h-5 rounded-full bg-emerald-500 hover:bg-emerald-600 transition-all flex items-center justify-center ${
+                              warna === 'hijau' ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                            }`}
+                            title="Tandai baris Hijau (Sudah Disetor)"
+                          >
+                            {warna === 'hijau' && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                          </button>
+
+                          {/* Merah / Perhatian */}
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSetColor(r, 'merah')}
+                            className={`w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600 transition-all flex items-center justify-center ${
+                              warna === 'merah' ? 'ring-2 ring-rose-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                            }`}
+                            title="Tandai baris Merah (Perhatian / Belum Disetor)"
+                          >
+                            {warna === 'merah' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                          </button>
+
+                          {/* Oranye / Proses */}
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSetColor(r, 'oranye')}
+                            className={`w-5 h-5 rounded-full bg-amber-500 hover:bg-amber-600 transition-all flex items-center justify-center ${
+                              warna === 'oranye' ? 'ring-2 ring-amber-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                            }`}
+                            title="Tandai baris Oranye (Dalam Proses)"
+                          >
+                            {warna === 'oranye' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                          </button>
+
+                          {/* Reset / Default */}
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSetColor(r, 'default')}
+                            className={`w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600 transition-all flex items-center justify-center ${
+                              warna === 'default' ? 'ring-2 ring-slate-400 scale-110' : 'opacity-60 hover:opacity-100'
+                            }`}
+                            title="Reset warna baris ke standar"
+                          >
+                            <span className="text-[8px] font-bold text-slate-600 dark:text-slate-300">✕</span>
+                          </button>
+                        </div>
+                      </td>
+                      <td className="p-3 text-center space-x-1">
+                        <button
+                          onClick={() => handleStartEdit(r)}
+                          className="p-1.5 text-slate-400 hover:text-sky-600 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/40 transition-colors"
+                          title="Edit data log SKUM ini"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => onDeleteRecord(r.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                          title="Hapus baris log ini"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
             <tfoot>
@@ -923,7 +1129,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                 <td className="p-3 text-right font-mono text-rose-600 dark:text-rose-400">
                   Rp {totalKredit.toLocaleString('id-ID')}
                 </td>
-                <td colSpan={2} className="p-3 text-center font-mono text-sky-600 dark:text-sky-400">
+                <td colSpan={3} className="p-3 text-center font-mono text-sky-600 dark:text-sky-400">
                   Saldo: Rp {saldoSkum.toLocaleString('id-ID')}
                 </td>
               </tr>
@@ -1076,6 +1282,63 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                       </>
                     )}
                   </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Pilih Warna & Status Baris SKUM:</label>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormWarnaBaris('default')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      formWarnaBaris === 'default'
+                        ? 'bg-slate-200 dark:bg-slate-700 border-slate-400 ring-2 ring-slate-400 text-slate-800 dark:text-white'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-slate-300 dark:bg-slate-600 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">⚪ Standar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormWarnaBaris('hijau')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      formWarnaBaris === 'hijau'
+                        ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-500 ring-2 ring-emerald-500 text-emerald-900 dark:text-emerald-200'
+                        : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🟢 Disetor</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormWarnaBaris('merah')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      formWarnaBaris === 'merah'
+                        ? 'bg-rose-100 dark:bg-rose-950 border-rose-500 ring-2 ring-rose-500 text-rose-900 dark:text-rose-200'
+                        : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-rose-500 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🔴 Perhatian</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormWarnaBaris('oranye')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      formWarnaBaris === 'oranye'
+                        ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 ring-2 ring-amber-500 text-amber-900 dark:text-amber-200'
+                        : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-amber-500 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🟠 Proses</span>
+                  </button>
                 </div>
               </div>
 
@@ -1256,6 +1519,63 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                       </>
                     )}
                   </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Pilih Warna & Status Baris SKUM:</label>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditWarnaBaris('default')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      editWarnaBaris === 'default'
+                        ? 'bg-slate-200 dark:bg-slate-700 border-slate-400 ring-2 ring-slate-400 text-slate-800 dark:text-white'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-slate-300 dark:bg-slate-600 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">⚪ Standar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditWarnaBaris('hijau')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      editWarnaBaris === 'hijau'
+                        ? 'bg-emerald-100 dark:bg-emerald-950 border-emerald-500 ring-2 ring-emerald-500 text-emerald-900 dark:text-emerald-200'
+                        : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🟢 Disetor</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditWarnaBaris('merah')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      editWarnaBaris === 'merah'
+                        ? 'bg-rose-100 dark:bg-rose-950 border-rose-500 ring-2 ring-rose-500 text-rose-900 dark:text-rose-200'
+                        : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-rose-500 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🔴 Perhatian</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditWarnaBaris('oranye')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      editWarnaBaris === 'oranye'
+                        ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 ring-2 ring-amber-500 text-amber-900 dark:text-amber-200'
+                        : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-amber-500 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🟠 Proses</span>
+                  </button>
                 </div>
               </div>
 

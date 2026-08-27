@@ -98,6 +98,7 @@ export interface JurnalBiayaSkumRecord {
   pengeluaran: number;    // Kredit SKUM (Panggilan, Meterai, Redaksi, Pemberkasan ATK, Sisa Panjar)
   keterangan: string;     // Catatan tambahan SKUM
   kategori: 'Panjar' | 'Panggilan' | 'Meterai' | 'Redaksi' | 'ATK' | 'Proses' | 'Sisa Panjar' | 'Pinjaman' | 'Lainnya';
+  warnaBaris?: 'hijau' | 'merah' | 'oranye' | 'default'; // Pilihan warna penanda baris (hijau=sudah disetor, merah=perhatian/belum, oranye=proses)
   createdAt: string;
 }
 
