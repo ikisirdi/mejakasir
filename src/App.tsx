@@ -296,9 +296,31 @@ export default function App() {
           const appsScriptData = await SyncService.fetchFromAppsScript(targetUrl);
           if (appsScriptData && appsScriptData.cases.length > 0) {
             let fetchedCases = appsScriptData.cases;
-            const activeJurnal = (appsScriptData.jurnalSkum && appsScriptData.jurnalSkum.length > 0)
-              ? sanitizeSkumRecords(appsScriptData.jurnalSkum)
-              : loadedJurnalSkum;
+            // Intelligently merge remote Jurnal SKUM with local loaded records to preserve row colors (warnaBaris)
+            let mergedJurnal: JurnalBiayaSkumRecord[] = loadedJurnalSkum;
+            if (appsScriptData.jurnalSkum && appsScriptData.jurnalSkum.length > 0) {
+              mergedJurnal = appsScriptData.jurnalSkum.map(remoteItem => {
+                const localMatch = loadedJurnalSkum.find(l => 
+                  (l.id && l.id === remoteItem.id) ||
+                  (l.nomorPerkara && l.uraian && 
+                   l.nomorPerkara.trim().toLowerCase() === remoteItem.nomorPerkara.trim().toLowerCase() && 
+                   l.uraian.trim().toLowerCase() === remoteItem.uraian.trim().toLowerCase())
+                );
+
+                let finalWarna = remoteItem.warnaBaris || 'default';
+                // If remote has no specific color but local had one saved, keep the local color
+                if (finalWarna === 'default' && localMatch && localMatch.warnaBaris && localMatch.warnaBaris !== 'default') {
+                  finalWarna = localMatch.warnaBaris;
+                }
+
+                return {
+                  ...remoteItem,
+                  warnaBaris: finalWarna
+                };
+              });
+            }
+
+            const activeJurnal = sanitizeSkumRecords(mergedJurnal);
 
             fetchedCases = updateCasesWithSkumLogs(fetchedCases, activeJurnal);
             const uniqueFetched = ensureUniqueCaseIds(fetchedCases);

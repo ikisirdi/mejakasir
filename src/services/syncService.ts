@@ -352,6 +352,16 @@ export class SyncService {
             }
           }
 
+          let rawWarna = String(j.warnaBaris || j.warna_baris || j.warna || j.statusWarna || j.status_warna || j.statusSetor || '').toLowerCase().trim();
+          let parsedWarna: 'hijau' | 'merah' | 'oranye' | 'default' = 'default';
+          if (rawWarna === 'hijau' || rawWarna === 'disetor' || rawWarna === 'green' || rawWarna === 'sudah disetor' || rawWarna === 'lunas') {
+            parsedWarna = 'hijau';
+          } else if (rawWarna === 'merah' || rawWarna === 'perhatian' || rawWarna === 'red' || rawWarna === 'belum' || rawWarna === 'belum disetor') {
+            parsedWarna = 'merah';
+          } else if (rawWarna === 'oranye' || rawWarna === 'orange' || rawWarna === 'proses' || rawWarna === 'dalam proses') {
+            parsedWarna = 'oranye';
+          }
+
           return {
             id: String(j.id || `skum-${idx + 1}`),
             tanggal: String(j.tanggal || new Date().toISOString().split('T')[0]),
@@ -361,6 +371,7 @@ export class SyncService {
             pengeluaran: peng,
             kategori: String(finalKategori) as any,
             keterangan: String(j.keterangan || ''),
+            warnaBaris: parsedWarna,
             createdAt: String(j.createdAt || new Date().toISOString())
           };
         });

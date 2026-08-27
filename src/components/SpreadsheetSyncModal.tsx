@@ -74,9 +74,22 @@ function setupSheets() {
     sheetJurnal = ss.insertSheet('JurnalBiayaSKUM');
     sheetJurnal.appendRow([
       'ID', 'Tanggal', 'Nomor Perkara', 'Uraian', 'Penerimaan / Debet',
-      'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'Created At'
+      'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'Warna Baris', 'Created At'
     ]);
-    sheetJurnal.getRange('A1:I1').setFontWeight('bold').setBackground('#bae6fd');
+    sheetJurnal.getRange('A1:J1').setFontWeight('bold').setBackground('#bae6fd');
+  } else {
+    var jHeaders = sheetJurnal.getRange(1, 1, 1, Math.max(10, sheetJurnal.getLastColumn())).getValues()[0];
+    var hasWarna = false;
+    for (var w = 0; w < jHeaders.length; w++) {
+      if (String(jHeaders[w] || '').toLowerCase().indexOf('warna') !== -1) {
+        hasWarna = true;
+        break;
+      }
+    }
+    if (!hasWarna && jHeaders.length < 10) {
+      sheetJurnal.getRange(1, 9).setValue('Warna Baris');
+      sheetJurnal.getRange(1, 10).setValue('Created At');
+    }
   }
 
   // 3. Sheet BukuBiayaProses (Buku Bantu Biaya Proses / ATK Kantor)
@@ -134,20 +147,52 @@ function doGet(e) {
   var jurnalSkum = [];
   if (sheetJurnal) {
     var dataJurnalRows = sheetJurnal.getDataRange().getValues();
-    for (var k = 1; k < dataJurnalRows.length; k++) {
-      var j = dataJurnalRows[k];
-      if (j[0] && String(j[0]).trim() !== '') {
-        jurnalSkum.push({
-          id: String(j[0]),
-          tanggal: j[1] ? Utilities.formatDate(new Date(j[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
-          nomorPerkara: String(j[2] || '-'),
-          uraian: String(j[3] || ''),
-          penerimaan: Number(j[4]) || 0,
-          pengeluaran: Number(j[5]) || 0,
-          kategori: String(j[6] || 'Panggilan'),
-          keterangan: String(j[7] || ''),
-          createdAt: String(j[8] || '')
-        });
+    if (dataJurnalRows.length > 1) {
+      var jHeaders = dataJurnalRows[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+      var idCol = 0, tglCol = 1, noCol = 2, uraianCol = 3, debetCol = 4, kreditCol = 5, katCol = 6, ketCol = 7, warnaCol = -1, createdCol = -1;
+
+      for (var h = 0; h < jHeaders.length; h++) {
+        if (jHeaders[h] === 'id') idCol = h;
+        else if (jHeaders[h] === 'tanggal') tglCol = h;
+        else if (jHeaders[h].indexOf('nomor') !== -1) noCol = h;
+        else if (jHeaders[h].indexOf('uraian') !== -1) uraianCol = h;
+        else if (jHeaders[h].indexOf('debet') !== -1 || jHeaders[h].indexOf('penerimaan') !== -1) debetCol = h;
+        else if (jHeaders[h].indexOf('kredit') !== -1 || jHeaders[h].indexOf('pengeluaran') !== -1) kreditCol = h;
+        else if (jHeaders[h].indexOf('kategori') !== -1) katCol = h;
+        else if (jHeaders[h].indexOf('keterangan') !== -1) ketCol = h;
+        else if (jHeaders[h].indexOf('warna') !== -1 || jHeaders[h].indexOf('status') !== -1) warnaCol = h;
+        else if (jHeaders[h].indexOf('created') !== -1) createdCol = h;
+      }
+
+      if (warnaCol === -1 && jHeaders.length >= 10) warnaCol = 8;
+      if (createdCol === -1) createdCol = jHeaders.length > 9 ? 9 : 8;
+
+      for (var k = 1; k < dataJurnalRows.length; k++) {
+        var j = dataJurnalRows[k];
+        if (j[idCol] && String(j[idCol]).trim() !== '') {
+          var rawW = warnaCol !== -1 ? String(j[warnaCol] || '').trim().toLowerCase() : '';
+          var parsedW = 'default';
+          if (rawW === 'hijau' || rawW === 'disetor' || rawW === 'green' || rawW === 'lunas' || rawW === 'sudah disetor') {
+            parsedW = 'hijau';
+          } else if (rawW === 'merah' || rawW === 'perhatian' || rawW === 'red' || rawW === 'belum' || rawW === 'belum disetor') {
+            parsedW = 'merah';
+          } else if (rawW === 'oranye' || rawW === 'orange' || rawW === 'proses' || rawW === 'dalam proses') {
+            parsedW = 'oranye';
+          }
+
+          jurnalSkum.push({
+            id: String(j[idCol]),
+            tanggal: j[tglCol] ? Utilities.formatDate(new Date(j[tglCol]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+            nomorPerkara: String(j[noCol] || '-'),
+            uraian: String(j[uraianCol] || ''),
+            penerimaan: Number(j[debetCol]) || 0,
+            pengeluaran: Number(j[kreditCol]) || 0,
+            kategori: String(j[katCol] || 'Panggilan'),
+            keterangan: String(j[ketCol] || ''),
+            warnaBaris: parsedW,
+            createdAt: String(createdCol !== -1 && j[createdCol] ? j[createdCol] : '')
+          });
+        }
       }
     }
   }
@@ -291,7 +336,8 @@ function doPost(e) {
       var sheet = ss.getSheetByName('JurnalBiayaSKUM') || ss.getSheetByName('JurnalSKUM');
       if (!sheet) {
         sheet = ss.insertSheet('JurnalBiayaSKUM');
-        sheet.appendRow(['ID', 'Tanggal', 'Nomor Perkara', 'Uraian', 'Penerimaan / Debet', 'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'Created At']);
+        sheet.appendRow(['ID', 'Tanggal', 'Nomor Perkara', 'Uraian', 'Penerimaan / Debet', 'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'Warna Baris', 'Created At']);
+        sheet.getRange('A1:J1').setFontWeight('bold').setBackground('#bae6fd');
       }
       var rowValues = [
         record.id || ('skum-' + Date.now()),
@@ -302,6 +348,7 @@ function doPost(e) {
         Number(record.pengeluaran) || 0,
         record.kategori || 'Panggilan',
         record.keterangan || '',
+        record.warnaBaris || 'default',
         record.createdAt || new Date().toISOString()
       ];
 
@@ -505,13 +552,13 @@ function writeJurnalSkumToSheet(ss, records) {
   sheet.clearContents();
   sheet.appendRow([
     'ID', 'Tanggal', 'Nomor Perkara', 'Uraian', 'Penerimaan / Debet',
-    'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'Created At'
+    'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'Warna Baris', 'Created At'
   ]);
-  sheet.getRange('A1:I1').setFontWeight('bold').setBackground('#bae6fd');
+  sheet.getRange('A1:J1').setFontWeight('bold').setBackground('#bae6fd');
   records.forEach(function(r) {
     sheet.appendRow([
       r.id, r.tanggal, r.nomorPerkara, r.uraian, r.penerimaan || 0,
-      r.pengeluaran || 0, r.kategori, r.keterangan || '', r.createdAt
+      r.pengeluaran || 0, r.kategori, r.keterangan || '', r.warnaBaris || 'default', r.createdAt
     ]);
   });
 }
