@@ -26,7 +26,7 @@ import { JurnalBiayaModal } from './components/JurnalBiayaModal';
 import { ToastNotification } from './components/ToastNotification';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'table' | 'buku-biaya-proses' | 'jurnal-skum'>('buku-biaya-proses');
+  const [activeTab, setActiveTab] = useState<'table' | 'buku-biaya-proses' | 'jurnal-skum'>('table');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('pa_perkara_theme_v1') as 'light' | 'dark') || 'light';
   });

@@ -82,6 +82,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-800/80 border-slate-700/60'
           }`}>
             <button
+              id="tab-table-btn"
+              onClick={() => setActiveTab('table')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center space-x-1.5 ${
+                activeTab === 'table'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : isLight 
+                    ? 'text-emerald-800 hover:bg-emerald-100/80' 
+                    : 'text-emerald-400 hover:text-white hover:bg-slate-700/50'
+              }`}
+            >
+              <span>⚖️ Daftar Saldo & Perkara</span>
+            </button>
+            <button
               id="tab-jurnal-skum-btn"
               onClick={() => setActiveTab('jurnal-skum')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center space-x-1.5 ${
@@ -106,19 +119,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <span>💼 Buku Bantu Biaya Proses</span>
-            </button>
-            <button
-              id="tab-table-btn"
-              onClick={() => setActiveTab('table')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'table'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : isLight 
-                    ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60' 
-                    : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
-              }`}
-            >
-              Daftar Saldo & Perkara
             </button>
           </div>
 
@@ -194,6 +194,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
       }`}>
         <button
+          onClick={() => setActiveTab('table')}
+          className={`flex-1 py-1.5 text-center text-[10px] font-bold rounded-lg ${
+            activeTab === 'table' 
+              ? 'bg-emerald-600 text-white font-extrabold shadow-xs' 
+              : isLight ? 'text-emerald-800 bg-emerald-50 border border-emerald-200' : 'text-emerald-400 bg-slate-800'
+          }`}
+        >
+          ⚖️ Saldo & Perkara
+        </button>
+        <button
           onClick={() => setActiveTab('jurnal-skum')}
           className={`flex-1 py-1.5 text-center text-[10px] font-bold rounded-lg ${
             activeTab === 'jurnal-skum' 
@@ -212,16 +222,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           }`}
         >
           💼 Buku Bantu
-        </button>
-        <button
-          onClick={() => setActiveTab('table')}
-          className={`flex-1 py-1.5 text-center text-[10px] font-semibold rounded-lg ${
-            activeTab === 'table' 
-              ? 'bg-emerald-600 text-white font-bold' 
-              : isLight ? 'text-slate-600 bg-slate-100' : 'text-slate-400 bg-slate-800'
-          }`}
-        >
-          Daftar Perkara
         </button>
       </div>
     </header>
