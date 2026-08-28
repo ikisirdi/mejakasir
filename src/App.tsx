@@ -15,7 +15,8 @@ import { SyncService } from './services/syncService';
 import { Navbar } from './components/Navbar';
 import { CaseTable } from './components/CaseTable';
 import { BukuBiayaProses } from './components/BukuBiayaProses';
-import { JurnalBiayaSkumView } from './components/JurnalBiayaSkumView';
+import { JurnalBiayaSkumView, getEffectiveWarnaBaris } from './components/JurnalBiayaSkumView';
+import { TitipanKasKuningView } from './components/TitipanKasKuningView';
 import { CaseFormModal } from './components/CaseFormModal';
 import { SpreadsheetSyncModal } from './components/SpreadsheetSyncModal';
 import { NotificationCenter } from './components/NotificationCenter';
@@ -26,7 +27,7 @@ import { JurnalBiayaModal } from './components/JurnalBiayaModal';
 import { ToastNotification } from './components/ToastNotification';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'table' | 'buku-biaya-proses' | 'jurnal-skum'>('table');
+  const [activeTab, setActiveTab] = useState<'table' | 'buku-biaya-proses' | 'jurnal-skum' | 'kas-kuning'>('table');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('pa_perkara_theme_v1') as 'light' | 'dark') || 'light';
   });
@@ -718,6 +719,33 @@ export default function App() {
     }
   };
 
+  const handleSyncAllColorsToCloud = async () => {
+    const webhook = getWebhookUrl(syncSettings);
+    if (!webhook) {
+      addNotification(
+        'Sinkronisasi Cloud Belum Terkonfigurasi',
+        'URL Google Apps Script belum diatur. Silakan atur URL Spreadsheet melalui menu sinkronisasi.',
+        'warning'
+      );
+      return { success: false, total: 0, synced: 0 };
+    }
+
+    try {
+      const res = await SyncService.syncColoredRecordsToCloud(webhook, jurnalSkumRecords);
+      if (res.success) {
+        addNotification(
+          'Warna Berhasil Disimpan ke Cloud',
+          `Sebanyak ${res.synced} dari ${res.total} baris berstatus/berwarna berhasil disinkronkan ke Google Sheets dan otomatis tampil di HP/laptop lain!`,
+          'success'
+        );
+      }
+      return res;
+    } catch (err: any) {
+      addNotification('Gagal Sinkronisasi Warna', err?.message || 'Terjadi kendala saat menyimpan warna baris ke cloud.', 'alert');
+      return { success: false, total: 0, synced: 0 };
+    }
+  };
+
   const handleDeleteJurnalSkumRecord = (id: string) => {
     try {
       const target = jurnalSkumRecords.find(r => r.id === id);
@@ -1228,6 +1256,7 @@ export default function App() {
   };
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
+  const countKasKuning = jurnalSkumRecords.filter(r => getEffectiveWarnaBaris(r) === 'kuning').length;
   const isLight = theme === 'light';
 
   return (
@@ -1252,6 +1281,7 @@ export default function App() {
         cacheMeta={cacheMeta}
         activeTab={activeTab}
         setActiveTab={setActiveTab}
+        countKasKuning={countKasKuning}
         theme={theme}
         onToggleTheme={handleToggleTheme}
       />
@@ -1260,7 +1290,17 @@ export default function App() {
       <main className="flex-1 max-w-[100%] xl:max-w-[1700px] 2xl:max-w-[1920px] w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
         
         {/* Dynamic View rendering */}
-        {activeTab === 'jurnal-skum' ? (
+        {activeTab === 'kas-kuning' ? (
+          <TitipanKasKuningView
+            records={jurnalSkumRecords}
+            cases={cases}
+            onUpdateRecord={handleUpdateJurnalSkumRecord}
+            onAddRecord={handleAddJurnalSkumRecord}
+            onDeleteRecord={handleDeleteJurnalSkumRecord}
+            onNavigateToJurnal={() => setActiveTab('jurnal-skum')}
+            theme={theme}
+          />
+        ) : activeTab === 'jurnal-skum' ? (
           <JurnalBiayaSkumView
             records={jurnalSkumRecords}
             cases={cases}
@@ -1275,6 +1315,8 @@ export default function App() {
             onAddPinjaman={handleAddPinjamanSkum}
             onBayarPinjaman={handleBayarPinjamanSkum}
             onDeletePinjaman={handleDeletePinjamanSkum}
+            onSyncAllColorsToCloud={handleSyncAllColorsToCloud}
+            onNavigateToKasKuning={() => setActiveTab('kas-kuning')}
             theme={theme}
           />
         ) : activeTab === 'buku-biaya-proses' ? (

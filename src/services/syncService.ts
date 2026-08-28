@@ -353,14 +353,25 @@ export class SyncService {
           }
 
           let rawWarna = String(j.warnaBaris || j.warna_baris || j.warna || j.statusWarna || j.status_warna || j.statusSetor || '').toLowerCase().trim();
-          let parsedWarna: 'hijau' | 'merah' | 'oranye' | 'default' = 'default';
+          let parsedWarna: 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default' = 'default';
           if (rawWarna === 'hijau' || rawWarna === 'disetor' || rawWarna === 'green' || rawWarna === 'sudah disetor' || rawWarna === 'lunas') {
             parsedWarna = 'hijau';
-          } else if (rawWarna === 'merah' || rawWarna === 'perhatian' || rawWarna === 'red' || rawWarna === 'belum' || rawWarna === 'belum disetor') {
+          } else if (rawWarna === 'kuning' || rawWarna === 'yellow' || rawWarna === 'belum setor' || rawWarna === 'belum setor cash' || rawWarna === 'titipan') {
+            parsedWarna = 'kuning';
+          } else if (rawWarna === 'merah' || rawWarna === 'perhatian' || rawWarna === 'red' || rawWarna === 'pinjaman' || rawWarna === 'belum' || rawWarna === 'belum disetor') {
             parsedWarna = 'merah';
           } else if (rawWarna === 'oranye' || rawWarna === 'orange' || rawWarna === 'proses' || rawWarna === 'dalam proses') {
             parsedWarna = 'oranye';
           }
+
+          let rawKet = String(j.keterangan || '');
+          // If remote column did not provide color, extract from embedded tag [WARNA:...] in keterangan or uraian
+          const tagMatch = rawKet.match(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/i) || 
+                           String(j.uraian || '').match(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/i);
+          if (tagMatch && parsedWarna === 'default') {
+            parsedWarna = tagMatch[1].toLowerCase() as any;
+          }
+          const cleanKeterangan = rawKet.replace(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/gi, '').trim();
 
           return {
             id: String(j.id || `skum-${idx + 1}`),
@@ -370,7 +381,7 @@ export class SyncService {
             penerimaan: pen,
             pengeluaran: peng,
             kategori: String(finalKategori) as any,
-            keterangan: String(j.keterangan || ''),
+            keterangan: cleanKeterangan,
             warnaBaris: parsedWarna,
             createdAt: String(j.createdAt || new Date().toISOString())
           };
@@ -503,6 +514,48 @@ export class SyncService {
       console.warn('Google Sheets webhook post warning:', err);
       return false;
     }
+  }
+
+  /**
+   * Synchronize all colored Jurnal SKUM records to Google Sheets across devices.
+   * Uses both embedded [WARNA:...] tag in keterangan and dedicated warnaBaris field.
+   */
+  static async syncColoredRecordsToCloud(webhookUrl: string, records: JurnalBiayaSkumRecord[]): Promise<{ success: boolean; total: number; synced: number }> {
+    if (!webhookUrl || !webhookUrl.startsWith('http') || !records || records.length === 0) {
+      return { success: false, total: 0, synced: 0 };
+    }
+
+    const coloredRecords = records.filter(r => {
+      const match = (r.keterangan || '').match(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/i);
+      const tagColor = match ? match[1].toLowerCase() : null;
+      const effectiveWarna = (r.warnaBaris && r.warnaBaris !== 'default') ? r.warnaBaris : tagColor;
+      return effectiveWarna && effectiveWarna !== 'default';
+    });
+
+    if (coloredRecords.length === 0) {
+      return { success: true, total: 0, synced: 0 };
+    }
+
+    let synced = 0;
+    for (const r of coloredRecords) {
+      const match = (r.keterangan || '').match(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/i);
+      const tagColor = match ? match[1].toLowerCase() : null;
+      const effectiveWarna = (r.warnaBaris && r.warnaBaris !== 'default') ? r.warnaBaris : (tagColor || 'default');
+
+      const cleanKet = (r.keterangan || '').replace(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/gi, '').trim();
+      const taggedKet = cleanKet ? `${cleanKet} [WARNA:${effectiveWarna}]` : `[WARNA:${effectiveWarna}]`;
+
+      const payload = {
+        ...r,
+        keterangan: taggedKet,
+        warnaBaris: effectiveWarna
+      };
+
+      const success = await this.postToWebhook(webhookUrl, 'update_jurnal_skum', payload);
+      if (success) synced++;
+    }
+
+    return { success: synced > 0 || coloredRecords.length === 0, total: coloredRecords.length, synced };
   }
 }
 

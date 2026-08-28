@@ -23,8 +23,25 @@ import {
   RotateCcw,
   Receipt,
   Palette,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
+
+export const getEffectiveWarnaBaris = (r: { warnaBaris?: string; keterangan?: string }): 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default' => {
+  if (r.warnaBaris && r.warnaBaris !== 'default') {
+    return r.warnaBaris as any;
+  }
+  if (r.keterangan) {
+    const match = r.keterangan.match(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/i);
+    if (match) return match[1].toLowerCase() as any;
+  }
+  return 'default';
+};
+
+export const stripWarnaTag = (keterangan?: string): string => {
+  if (!keterangan) return '';
+  return keterangan.replace(/\[WARNA:(hijau|kuning|merah|oranye|default)\]/gi, '').trim();
+};
 
 interface JurnalBiayaSkumViewProps {
   records: JurnalBiayaSkumRecord[];
@@ -37,6 +54,8 @@ interface JurnalBiayaSkumViewProps {
   onAddPinjaman?: (data: { tanggal: string; nomorPerkara: string; peminjam: string; jumlah: number; keterangan: string }) => void;
   onBayarPinjaman?: (pinjamanId: string) => void;
   onDeletePinjaman?: (pinjamanId: string) => void;
+  onSyncAllColorsToCloud?: () => Promise<{ success: boolean; total: number; synced: number }>;
+  onNavigateToKasKuning?: () => void;
   theme?: 'light' | 'dark';
 }
 
@@ -51,6 +70,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   onAddPinjaman,
   onBayarPinjaman,
   onDeletePinjaman,
+  onSyncAllColorsToCloud,
+  onNavigateToKasKuning,
   theme = 'light'
 }) => {
   const isLight = theme === 'light';
@@ -82,11 +103,30 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     return unpaidLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
   }, [unpaidLoans]);
 
-  // Color Counts for Statistics & Quick Filters
-  const countHijau = useMemo(() => records.filter(r => r.warnaBaris === 'hijau').length, [records]);
-  const countMerah = useMemo(() => records.filter(r => r.warnaBaris === 'merah').length, [records]);
-  const countOranye = useMemo(() => records.filter(r => r.warnaBaris === 'oranye').length, [records]);
-  const countDefault = useMemo(() => records.filter(r => !r.warnaBaris || r.warnaBaris === 'default').length, [records]);
+  // Color Counts for Statistics & Quick Filters (Using getEffectiveWarnaBaris to support cross-device sync)
+  const countHijau = useMemo(() => records.filter(r => getEffectiveWarnaBaris(r) === 'hijau').length, [records]);
+  const countKuning = useMemo(() => records.filter(r => getEffectiveWarnaBaris(r) === 'kuning').length, [records]);
+  const countMerah = useMemo(() => records.filter(r => getEffectiveWarnaBaris(r) === 'merah').length, [records]);
+  const countOranye = useMemo(() => records.filter(r => getEffectiveWarnaBaris(r) === 'oranye').length, [records]);
+  const countDefault = useMemo(() => records.filter(r => getEffectiveWarnaBaris(r) === 'default').length, [records]);
+
+  // Sync colors cross-device state
+  const [isSyncingColors, setIsSyncingColors] = useState(false);
+  const [syncColorsSuccess, setSyncColorsSuccess] = useState(false);
+
+  const handleSyncAllColors = async () => {
+    if (!onSyncAllColorsToCloud) return;
+    setIsSyncingColors(true);
+    try {
+      const res = await onSyncAllColorsToCloud();
+      if (res.success) {
+        setSyncColorsSuccess(true);
+        setTimeout(() => setSyncColorsSuccess(false), 4000);
+      }
+    } finally {
+      setIsSyncingColors(false);
+    }
+  };
 
   // Available unique case numbers for dropdown filter
   const availableNomorPerkara = useMemo(() => {
@@ -113,7 +153,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [formNominal, setFormNominal] = useState<number>(0);
   const [formKategori, setFormKategori] = useState<JurnalBiayaSkumRecord['kategori']>('Panggilan');
   const [formKeterangan, setFormKeterangan] = useState('');
-  const [formWarnaBaris, setFormWarnaBaris] = useState<'hijau' | 'merah' | 'oranye' | 'default'>('default');
+  const [formWarnaBaris, setFormWarnaBaris] = useState<'hijau' | 'kuning' | 'merah' | 'oranye' | 'default'>('default');
 
   // Modal Edit SKUM
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -125,13 +165,20 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [editNominal, setEditNominal] = useState<number>(0);
   const [editKategori, setEditKategori] = useState<JurnalBiayaSkumRecord['kategori']>('Panggilan');
   const [editKeterangan, setEditKeterangan] = useState('');
-  const [editWarnaBaris, setEditWarnaBaris] = useState<'hijau' | 'merah' | 'oranye' | 'default'>('default');
+  const [editWarnaBaris, setEditWarnaBaris] = useState<'hijau' | 'kuning' | 'merah' | 'oranye' | 'default'>('default');
 
-  // Quick set row color
-  const handleQuickSetColor = (record: JurnalBiayaSkumRecord, color: 'hijau' | 'merah' | 'oranye' | 'default') => {
-    const nextColor = record.warnaBaris === color && color !== 'default' ? 'default' : color;
+  // Quick set row color with dual cross-device persistence
+  const handleQuickSetColor = (record: JurnalBiayaSkumRecord, color: 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default') => {
+    const currentWarna = getEffectiveWarnaBaris(record);
+    const nextColor = currentWarna === color && color !== 'default' ? 'default' : color;
+    const cleanKet = stripWarnaTag(record.keterangan);
+    const updatedKeterangan = nextColor !== 'default'
+      ? (cleanKet ? `${cleanKet} [WARNA:${nextColor}]` : `[WARNA:${nextColor}]`)
+      : cleanKet;
+
     onUpdateRecord({
       ...record,
+      keterangan: updatedKeterangan,
       warnaBaris: nextColor
     });
   };
@@ -153,8 +200,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       setEditNominal(record.pengeluaran || 0);
     }
     setEditKategori(record.kategori || 'Panggilan');
-    setEditKeterangan(record.keterangan || '');
-    setEditWarnaBaris(record.warnaBaris || 'default');
+    setEditKeterangan(stripWarnaTag(record.keterangan));
+    setEditWarnaBaris(getEffectiveWarnaBaris(record));
     setIsEditModalOpen(true);
   };
 
@@ -167,6 +214,10 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
     const isKredit = editJenisTransaksi === 'KREDIT';
     const finalKategori = isKredit && editKategori === 'Panjar' ? 'Panggilan' : editKategori;
+    const cleanKet = stripWarnaTag(editKeterangan);
+    const updatedKeterangan = editWarnaBaris !== 'default'
+      ? (cleanKet ? `${cleanKet} [WARNA:${editWarnaBaris}]` : `[WARNA:${editWarnaBaris}]`)
+      : cleanKet;
 
     onUpdateRecord({
       ...editingRecord,
@@ -176,7 +227,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       penerimaan: isKredit ? 0 : editNominal,
       pengeluaran: isKredit ? editNominal : 0,
       kategori: finalKategori,
-      keterangan: editKeterangan,
+      keterangan: updatedKeterangan,
       warnaBaris: editWarnaBaris
     });
 
@@ -233,10 +284,11 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const filteredRecords = useMemo(() => {
     return records
       .filter(r => {
+        const cleanKet = stripWarnaTag(r.keterangan);
         const matchQuery = 
           r.nomorPerkara.toLowerCase().includes(searchQuery.toLowerCase()) ||
           r.uraian.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          r.keterangan.toLowerCase().includes(searchQuery.toLowerCase());
+          cleanKet.toLowerCase().includes(searchQuery.toLowerCase());
 
         const matchNomorPerkara = filterNomorPerkara === 'ALL' || r.nomorPerkara === filterNomorPerkara;
         const matchCategory = filterCategory === 'ALL' || r.kategori === filterCategory;
@@ -254,9 +306,10 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           }
         }
 
+        const effWarna = getEffectiveWarnaBaris(r);
         const matchWarna = 
           filterWarna === 'ALL' ||
-          (filterWarna === 'default' ? (!r.warnaBaris || r.warnaBaris === 'default') : r.warnaBaris === filterWarna);
+          (filterWarna === 'default' ? effWarna === 'default' : effWarna === filterWarna);
 
         return matchQuery && matchNomorPerkara && matchCategory && matchMonthYear && matchWarna;
       })
@@ -341,6 +394,10 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
     const isKredit = formJenisTransaksi === 'KREDIT';
     const finalKategori = isKredit && formKategori === 'Panjar' ? 'Panggilan' : formKategori;
+    const cleanKet = stripWarnaTag(formKeterangan || 'Log Transaksi Manual Jurnal SKUM');
+    const finalKeterangan = formWarnaBaris !== 'default'
+      ? `${cleanKet} [WARNA:${formWarnaBaris}]`
+      : cleanKet;
 
     onAddRecord({
       tanggal: formTanggal,
@@ -349,7 +406,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       penerimaan: isKredit ? 0 : formNominal,
       pengeluaran: isKredit ? formNominal : 0,
       kategori: finalKategori,
-      keterangan: formKeterangan || 'Log Transaksi Manual Jurnal SKUM',
+      keterangan: finalKeterangan,
       warnaBaris: formWarnaBaris
     });
 
@@ -408,6 +465,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           .footer { margin-top: 40px; display: flex; justify-content: space-between; page-break-inside: avoid; }
           .sig-box { text-align: center; width: 230px; }
           .row-hijau { background-color: #ecfdf5 !important; }
+          .row-kuning { background-color: #fef9c3 !important; }
           .row-merah { background-color: #fff1f2 !important; }
           .row-oranye { background-color: #fffbeb !important; }
         </style>
@@ -437,8 +495,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             ${filteredRecords.length === 0 ? `
               <tr><td colspan="8" class="text-center" style="padding: 20px;">Belum ada data jurnal SKUM perkara.</td></tr>
             ` : filteredRecords.map((r, i) => {
-              const rowClass = r.warnaBaris === 'hijau' ? 'row-hijau' : r.warnaBaris === 'merah' ? 'row-merah' : r.warnaBaris === 'oranye' ? 'row-oranye' : '';
-              const statusText = r.warnaBaris === 'hijau' ? 'Disetor (Hijau)' : r.warnaBaris === 'merah' ? 'Perhatian (Merah)' : r.warnaBaris === 'oranye' ? 'Proses (Oranye)' : '-';
+              const effW = getEffectiveWarnaBaris(r);
+              const rowClass = effW === 'hijau' ? 'row-hijau' : effW === 'kuning' ? 'row-kuning' : effW === 'merah' ? 'row-merah' : effW === 'oranye' ? 'row-oranye' : '';
+              const statusText = effW === 'hijau' ? 'Disetor (Hijau)' : effW === 'kuning' ? 'Belum Setor Cash (Kuning)' : effW === 'merah' ? 'Pinjaman (Merah)' : effW === 'oranye' ? 'Proses (Oranye)' : '-';
               return `
               <tr class="${rowClass}">
                 <td class="text-center">${i + 1}</td>
@@ -924,6 +983,22 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             </button>
 
             <button
+              onClick={() => setFilterWarna(filterWarna === 'kuning' ? 'ALL' : 'kuning')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 border ${
+                filterWarna === 'kuning'
+                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs ring-2 ring-amber-300 font-black'
+                  : isLight
+                    ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                    : 'bg-amber-950/40 text-amber-300 border-amber-800 hover:bg-amber-900/50'
+              }`}
+              title="Tampilkan transaksi belum setor cash ke bendahara (Warna Kuning - Kuitansi)"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400 border border-amber-600"></span>
+              <span>Belum Setor Cash</span>
+              <span className="text-[10px] font-mono font-black">({countKuning})</span>
+            </button>
+
+            <button
               onClick={() => setFilterWarna(filterWarna === 'merah' ? 'ALL' : 'merah')}
               className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 border ${
                 filterWarna === 'merah'
@@ -932,10 +1007,10 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                     ? 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
                     : 'bg-rose-950/40 text-rose-300 border-rose-800 hover:bg-rose-900/50'
               }`}
-              title="Tampilkan transaksi perhatian / belum disetor (Warna Merah)"
+              title="Tampilkan transaksi pinjaman SKUM (Warna Merah)"
             >
               <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-              <span>Perhatian</span>
+              <span>Pinjaman SKUM</span>
               <span className="text-[10px] font-mono font-black">({countMerah})</span>
             </button>
 
@@ -954,6 +1029,39 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               <span>Proses</span>
               <span className="text-[10px] font-mono font-black">({countOranye})</span>
             </button>
+
+            {/* Shortcut button to open Menu Khusus Kas Kuning */}
+            {onNavigateToKasKuning && (
+              <button
+                type="button"
+                onClick={onNavigateToKasKuning}
+                className="px-3 py-1.5 rounded-lg text-xs font-black bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all flex items-center space-x-1.5 shadow-sm ring-1 ring-amber-400 active:scale-95"
+                title="Buka Menu Khusus Cetak Kuitansi & Rekapitulasi Kas Kuning"
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>Menu Kas Kuning {countKuning > 0 ? `(${countKuning})` : ''}</span>
+              </button>
+            )}
+
+            {/* Sync Colors across devices button */}
+            {onSyncAllColorsToCloud && (
+              <button
+                type="button"
+                onClick={handleSyncAllColors}
+                disabled={isSyncingColors}
+                className={`ml-auto px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 border shadow-xs ${
+                  syncColorsSuccess
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : isLight
+                      ? 'bg-sky-50 text-sky-800 border-sky-300 hover:bg-sky-100'
+                      : 'bg-sky-950/60 text-sky-300 border-sky-700 hover:bg-sky-900/60'
+                }`}
+                title="Simpan & Sinkronkan semua warna baris ke Google Sheets agar terbaca di HP dan perangkat lain"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingColors ? 'animate-spin' : ''}`} />
+                <span>{isSyncingColors ? 'Menyimpan...' : syncColorsSuccess ? '✓ Tersinkron Lintas Device!' : '🔄 Sinkronkan Warna ke Cloud'}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1001,8 +1109,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             }`}
           >
             <option value="ALL">🎨 Semua Warna & Status</option>
-            <option value="hijau">🟢 Hijau (Sudah Disetor)</option>
-            <option value="merah">🔴 Merah (Perhatian / Belum Disetor)</option>
+            <option value="hijau">🟢 Hijau (Sudah Disetor ke Bendahara)</option>
+            <option value="kuning">🟡 Kuning (Belum Setor Cash / Kuitansi)</option>
+            <option value="merah">🔴 Merah (Pinjaman Saldo SKUM)</option>
             <option value="oranye">🟠 Oranye (Dalam Proses)</option>
             <option value="default">⚪ Standar (Tanpa Warna)</option>
           </select>
@@ -1087,12 +1196,16 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                 </tr>
               ) : (
                 filteredRecords.map((r, idx) => {
-                  const warna = r.warnaBaris || 'default';
+                  const warna = getEffectiveWarnaBaris(r);
                   let rowColorClass = '';
                   if (warna === 'hijau') {
                     rowColorClass = isLight 
                       ? 'bg-emerald-50/80 hover:bg-emerald-100/90 border-l-4 border-l-emerald-600' 
                       : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-l-4 border-l-emerald-500';
+                  } else if (warna === 'kuning') {
+                    rowColorClass = isLight 
+                      ? 'bg-amber-50/80 hover:bg-amber-100/90 border-l-4 border-l-amber-500' 
+                      : 'bg-amber-950/35 hover:bg-amber-900/45 border-l-4 border-l-amber-400';
                   } else if (warna === 'merah') {
                     rowColorClass = isLight 
                       ? 'bg-rose-50/80 hover:bg-rose-100/90 border-l-4 border-l-rose-600' 
@@ -1107,6 +1220,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                       : 'hover:bg-slate-800/50 border-l-4 border-l-transparent';
                   }
 
+                  const cleanKet = stripWarnaTag(r.keterangan);
+
                   return (
                     <tr 
                       key={`${r.id}-${idx}`} 
@@ -1119,8 +1234,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                       </td>
                       <td className="p-3">
                         <div className="font-bold text-slate-900 dark:text-slate-100 text-xs">{r.uraian}</div>
-                        {r.keterangan && (
-                          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">{r.keterangan}</div>
+                        {cleanKet && (
+                          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">{cleanKet}</div>
                         )}
                       </td>
                       <td className="p-3 text-right font-mono font-black text-emerald-700 dark:text-emerald-300">
@@ -1145,9 +1260,14 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                               <Check className="w-2.5 h-2.5" /> Sudah Disetor
                             </span>
                           )}
+                          {warna === 'kuning' && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-400 text-slate-950 flex items-center gap-0.5 shadow-xs border border-amber-500">
+                              🟡 Belum Setor Cash
+                            </span>
+                          )}
                           {warna === 'merah' && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-600 text-white flex items-center gap-0.5 shadow-xs">
-                              🔴 Perhatian
+                              🔴 Pinjaman
                             </span>
                           )}
                           {warna === 'oranye' && (
@@ -1167,19 +1287,31 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                             className={`w-5 h-5 rounded-full bg-emerald-500 hover:bg-emerald-600 transition-all flex items-center justify-center ${
                               warna === 'hijau' ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
                             }`}
-                            title="Tandai baris Hijau (Sudah Disetor)"
+                            title="Tandai baris Hijau (Sudah Disetor ke Bendahara)"
                           >
                             {warna === 'hijau' && <Check className="w-3 h-3 text-white stroke-[3]" />}
                           </button>
 
-                          {/* Merah / Perhatian */}
+                          {/* Kuning / Belum Setor Cash (Bisa Cetak Kuitansi) */}
+                          <button
+                            type="button"
+                            onClick={() => handleQuickSetColor(r, 'kuning')}
+                            className={`w-5 h-5 rounded-full bg-amber-400 hover:bg-amber-500 border border-amber-600 transition-all flex items-center justify-center ${
+                              warna === 'kuning' ? 'ring-2 ring-amber-600 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                            }`}
+                            title="Tandai baris Kuning (Belum Setor Uang Cash ke Bendahara - Kuitansi)"
+                          >
+                            {warna === 'kuning' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                          </button>
+
+                          {/* Merah / Pinjaman */}
                           <button
                             type="button"
                             onClick={() => handleQuickSetColor(r, 'merah')}
                             className={`w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600 transition-all flex items-center justify-center ${
                               warna === 'merah' ? 'ring-2 ring-rose-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
                             }`}
-                            title="Tandai baris Merah (Perhatian / Belum Disetor)"
+                            title="Tandai baris Merah (Pinjaman Saldo SKUM)"
                           >
                             {warna === 'merah' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
                           </button>
@@ -1210,6 +1342,16 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                         </div>
                       </td>
                       <td className="p-3 text-center space-x-1">
+                        {/* Quick receipt button for Yellow rows */}
+                        {warna === 'kuning' && onNavigateToKasKuning && (
+                          <button
+                            onClick={onNavigateToKasKuning}
+                            className="p-1.5 text-amber-700 dark:text-amber-300 hover:text-amber-900 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors inline-flex items-center"
+                            title="Buka menu kuitansi kas kuning untuk cetak tanda terima"
+                          >
+                            <Receipt className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleStartEdit(r)}
                           className="p-1.5 text-slate-400 hover:text-sky-600 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/40 transition-colors"
@@ -1399,7 +1541,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
               <div>
                 <label className="block font-bold mb-1">Pilih Warna & Status Baris SKUM:</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   <button
                     type="button"
                     onClick={() => setFormWarnaBaris('default')}
@@ -1428,6 +1570,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => setFormWarnaBaris('kuning')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      formWarnaBaris === 'kuning'
+                        ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 ring-2 ring-amber-500 text-amber-950 dark:text-amber-200'
+                        : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-amber-400 border border-amber-600 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🟡 Kas Kuning</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setFormWarnaBaris('merah')}
                     className={`p-2 rounded-xl border text-center font-bold transition-all ${
                       formWarnaBaris === 'merah'
@@ -1436,7 +1591,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                     }`}
                   >
                     <div className="w-3.5 h-3.5 rounded-full bg-rose-500 mx-auto mb-1"></div>
-                    <span className="text-[10px] block">🔴 Perhatian</span>
+                    <span className="text-[10px] block">🔴 Pinjaman</span>
                   </button>
 
                   <button
@@ -1636,7 +1791,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
               <div>
                 <label className="block font-bold mb-1">Pilih Warna & Status Baris SKUM:</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   <button
                     type="button"
                     onClick={() => setEditWarnaBaris('default')}
@@ -1665,6 +1820,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
                   <button
                     type="button"
+                    onClick={() => setEditWarnaBaris('kuning')}
+                    className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                      editWarnaBaris === 'kuning'
+                        ? 'bg-amber-100 dark:bg-amber-950 border-amber-500 ring-2 ring-amber-500 text-amber-950 dark:text-amber-200'
+                        : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-400 opacity-70'
+                    }`}
+                  >
+                    <div className="w-3.5 h-3.5 rounded-full bg-amber-400 border border-amber-600 mx-auto mb-1"></div>
+                    <span className="text-[10px] block">🟡 Kas Kuning</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setEditWarnaBaris('merah')}
                     className={`p-2 rounded-xl border text-center font-bold transition-all ${
                       editWarnaBaris === 'merah'
@@ -1673,7 +1841,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                     }`}
                   >
                     <div className="w-3.5 h-3.5 rounded-full bg-rose-500 mx-auto mb-1"></div>
-                    <span className="text-[10px] block">🔴 Perhatian</span>
+                    <span className="text-[10px] block">🔴 Pinjaman</span>
                   </button>
 
                   <button

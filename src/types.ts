@@ -98,7 +98,7 @@ export interface JurnalBiayaSkumRecord {
   pengeluaran: number;    // Kredit SKUM (Panggilan, Meterai, Redaksi, Pemberkasan ATK, Sisa Panjar)
   keterangan: string;     // Catatan tambahan SKUM
   kategori: 'Panjar' | 'Panggilan' | 'Meterai' | 'Redaksi' | 'ATK' | 'Proses' | 'Sisa Panjar' | 'Pinjaman' | 'Lainnya';
-  warnaBaris?: 'hijau' | 'merah' | 'oranye' | 'default'; // Pilihan warna penanda baris (hijau=sudah disetor, merah=perhatian/belum, oranye=proses)
+  warnaBaris?: 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default'; // Pilihan warna: hijau=sudah disetor, kuning=belum setor cash/kuitansi, merah=pinjaman SKUM, oranye=proses
   createdAt: string;
 }
 
@@ -116,5 +116,5 @@ export interface PinjamanSkumRecord {
   skumPengembalianId?: string; // ID of pengembalian in Jurnal SKUM
 }
 
-export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table';
+export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table' | 'kas-kuning';
 

@@ -22,8 +22,9 @@ interface NavbarProps {
   unreadNotifCount: number;
   syncSettings: SyncSettings;
   cacheMeta: CacheMetadata;
-  activeTab: 'table' | 'buku-biaya-proses' | 'jurnal-skum';
-  setActiveTab: (tab: 'table' | 'buku-biaya-proses' | 'jurnal-skum') => void;
+  activeTab: 'table' | 'buku-biaya-proses' | 'jurnal-skum' | 'kas-kuning';
+  setActiveTab: (tab: 'table' | 'buku-biaya-proses' | 'jurnal-skum' | 'kas-kuning') => void;
+  countKasKuning?: number;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
 }
@@ -39,6 +40,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   cacheMeta,
   activeTab,
   setActiveTab,
+  countKasKuning = 0,
   theme,
   onToggleTheme
 }) => {
@@ -119,6 +121,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <span>💼 Buku Bantu Biaya Proses</span>
+            </button>
+            <button
+              id="tab-kas-kuning-btn"
+              onClick={() => setActiveTab('kas-kuning')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center space-x-1.5 ${
+                activeTab === 'kas-kuning'
+                  ? 'bg-amber-500 text-slate-950 shadow-md font-black ring-2 ring-amber-400'
+                  : isLight 
+                    ? 'text-amber-900 hover:bg-amber-100/80' 
+                    : 'text-amber-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+              title="Menu Khusus: Titipan Uang Cash Belum Disetor ke Bendahara Penerimaan (Kuitansi)"
+            >
+              <span>🟡 Kas Belum Disetor</span>
+              {countKasKuning > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-600 text-white font-mono shadow-xs">
+                  {countKasKuning}
+                </span>
+              )}
             </button>
           </div>
 
@@ -222,6 +243,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           }`}
         >
           💼 Buku Bantu
+        </button>
+        <button
+          onClick={() => setActiveTab('kas-kuning')}
+          className={`flex-1 py-1.5 text-center text-[10px] font-bold rounded-lg ${
+            activeTab === 'kas-kuning' 
+              ? 'bg-amber-500 text-slate-950 font-black shadow-xs' 
+              : isLight ? 'text-amber-900 bg-amber-50 border border-amber-200' : 'text-amber-400 bg-slate-800'
+          }`}
+        >
+          🟡 Kas Kuning {countKasKuning > 0 ? `(${countKasKuning})` : ''}
         </button>
       </div>
     </header>
