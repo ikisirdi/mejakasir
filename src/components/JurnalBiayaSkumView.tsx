@@ -277,6 +277,42 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const totalKredit = filteredRecords.reduce((acc, r) => acc + (r.pengeluaran || 0), 0);
   const saldoSkum = totalDebet - totalKredit;
 
+  // Pinjaman saldo SKUM kepaniteraan yang belum lunas/kembali
+  const effectiveUnpaidLoanAmount = useMemo(() => {
+    // Jika filtering perkara spesifik, cari pinjaman perkara tersebut
+    if (filterNomorPerkara !== 'ALL') {
+      const caseLoans = unpaidLoans.filter(p => p.nomorPerkara && p.nomorPerkara.trim().toLowerCase() === filterNomorPerkara.trim().toLowerCase());
+      if (caseLoans.length > 0) {
+        return caseLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
+      }
+      const pinjamPengeluaran = filteredRecords
+        .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam')) && (r.pengeluaran || 0) > 0)
+        .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+      const pinjamPenerimaan = filteredRecords
+        .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam') || (r.uraian || '').toLowerCase().includes('pengembalian')) && (r.penerimaan || 0) > 0)
+        .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
+      const net = pinjamPengeluaran - pinjamPenerimaan;
+      return net > 0 ? net : 0;
+    }
+
+    if (totalUnpaidAmount > 0) {
+      return totalUnpaidAmount;
+    }
+
+    // Fallback: hitung dari records jika pinjamanRecords belum diinisialisasi
+    const pinjamPengeluaran = filteredRecords
+      .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam')) && (r.pengeluaran || 0) > 0)
+      .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+    const pinjamPenerimaan = filteredRecords
+      .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam') || (r.uraian || '').toLowerCase().includes('pengembalian')) && (r.penerimaan || 0) > 0)
+      .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
+    const net = pinjamPengeluaran - pinjamPenerimaan;
+    return net > 0 ? net : 0;
+  }, [totalUnpaidAmount, unpaidLoans, filterNomorPerkara, filteredRecords]);
+
+  // Saldo Sesungguhnya: Saldo Perkara SKUM + Pinjaman Saldo SKUM Kepaniteraan
+  const saldoSesungguhnya = saldoSkum + effectiveUnpaidLoanAmount;
+
   // Detect records with dual posting (both penerimaan > 0 AND pengeluaran > 0)
   const doublePostingRecords = useMemo(() => {
     return records.filter(r => (r.penerimaan || 0) > 0 && (r.pengeluaran || 0) > 0);
@@ -424,9 +460,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               <td colspan="2"></td>
             </tr>
             <tr style="background-color: #e0f2fe; font-weight: bold;">
-              <td colspan="4" class="text-right">SALDO TERSISA SKUM PERKARA:</td>
-              <td colspan="4" class="text-center" style="font-size: 11px;">Rp ${saldoSkum.toLocaleString('id-ID')}</td>
+              <td colspan="4" class="text-right">SALDO BUKU SKUM PERKARA:</td>
+              <td colspan="4" class="text-center" style="font-size: 11px; ${saldoSkum < 0 ? 'color: #dc2626;' : ''}">Rp ${saldoSkum.toLocaleString('id-ID')}</td>
             </tr>
+            ${effectiveUnpaidLoanAmount > 0 ? `
+            <tr style="background-color: #fef3c7; font-weight: bold;">
+              <td colspan="4" class="text-right">PINJAMAN SALDO SKUM KEPANITERAAN (BELUM KEMBALI):</td>
+              <td colspan="4" class="text-center" style="font-size: 11px; color: #b45309;">+ Rp ${effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</td>
+            </tr>
+            <tr style="background-color: #d1fae5; font-weight: bold;">
+              <td colspan="4" class="text-right">SALDO SESUNGGUHNYA (KAS RIIL FISIK):</td>
+              <td colspan="4" class="text-center" style="font-size: 12px; color: #047857;">Rp ${saldoSesungguhnya.toLocaleString('id-ID')}</td>
+            </tr>
+            ` : ''}
           </tfoot>
         </table>
         <div class="footer">
@@ -707,23 +753,51 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           }`}>
             Rp {saldoSkum.toLocaleString('id-ID')}
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">Debet Ditambah Kredit Berjalan</span>
+          <span className="text-[10px] text-slate-400 block mt-1">Debet Dikurangi Kredit Berjalan (Buku SKUM)</span>
         </div>
 
-        {/* Total Item Log */}
-        <div className={`p-4 rounded-2xl border shadow-sm ${
-          isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
-        }`}>
+        {/* Saldo Sesungguhnya (Saldo Perkara SKUM + Pinjaman Saldo SKUM Kepaniteraan) */}
+        <div 
+          onClick={() => setIsRiwayatPinjamanModalOpen(true)}
+          className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 ${
+            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+          }`}
+          title="Klik untuk melihat rincian & riwayat pinjaman saldo SKUM kepaniteraan"
+        >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Transaksi SKUM</span>
-            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600">
-              <BookOpen className="w-4 h-4" />
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Saldo Sesungguhnya</span>
+            <div className="flex items-center space-x-1.5">
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                saldoSesungguhnya < 0 
+                  ? 'bg-rose-100 text-rose-800 border border-rose-300' 
+                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+              }`}>
+                {effectiveUnpaidLoanAmount > 0 
+                  ? `+ Pinjam Rp ${effectiveUnpaidLoanAmount.toLocaleString('id-ID')}` 
+                  : 'Kas Utuh'}
+              </span>
+              <div className={`p-1.5 rounded-xl ${
+                saldoSesungguhnya < 0 
+                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' 
+                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              }`}>
+                <Wallet className="w-4 h-4" />
+              </div>
             </div>
           </div>
-          <div className="font-mono text-xl font-extrabold text-indigo-600 dark:text-indigo-400">
-            {filteredRecords.length} <span className="text-xs font-normal text-slate-400">Baris</span>
+          <div className={`font-mono text-xl font-extrabold ${
+            saldoSesungguhnya < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+          }`}>
+            Rp {saldoSesungguhnya.toLocaleString('id-ID')}
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">Sesuai Filter Kriteria</span>
+          <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+            <span>Saldo SKUM + Pinjaman</span>
+            {effectiveUnpaidLoanAmount > 0 && (
+              <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                (+Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')})
+              </span>
+            )}
+          </div>
         </div>
 
       </div>
@@ -752,14 +826,52 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       )}
 
       {saldoSkum < 0 && (
-        <div className="p-4 rounded-2xl bg-rose-500/10 border-2 border-rose-500/30 text-rose-900 dark:text-rose-200 flex items-center space-x-3 shadow-md">
-          <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
-          <div>
-            <h4 className="font-extrabold text-xs uppercase tracking-wide">⚠️ PERINGATAN DEFISIT SALDO JURNAL SKUM</h4>
-            <p className="text-xs mt-0.5 opacity-90">
-              Total pengeluaran (Rp {totalKredit.toLocaleString('id-ID')}) melebihi total penerimaan (Rp {totalDebet.toLocaleString('id-ID')}). Terdapat defisit saldo sebesar <strong className="font-black underline">Rp {Math.abs(saldoSkum).toLocaleString('id-ID')}</strong>.
-            </p>
+        <div className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+          saldoSesungguhnya >= 0 
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200' 
+            : 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-200'
+        }`}>
+          <div className="flex items-start space-x-3">
+            <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${saldoSesungguhnya >= 0 ? 'text-amber-500' : 'text-rose-500'}`} />
+            <div>
+              <h4 className="font-extrabold text-xs uppercase tracking-wide flex items-center gap-2">
+                <span>
+                  {saldoSesungguhnya >= 0 
+                    ? '⚠️ SALDO BUKU SKUM TERCATAT MINUS KARENA PINJAMAN KEPANITERAAN' 
+                    : '⚠️ PERINGATAN DEFISIT SALDO JURNAL SKUM'
+                  }
+                </span>
+                {effectiveUnpaidLoanAmount > 0 && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-100">
+                    Ada Pinjaman Belum Kembali
+                  </span>
+                )}
+              </h4>
+              <p className="text-xs mt-1 opacity-90 leading-relaxed">
+                {saldoSesungguhnya >= 0 ? (
+                  <>
+                    Saldo buku SKUM saat ini tercatat minus <strong>Rp {Math.abs(saldoSkum).toLocaleString('id-ID')}</strong> akibat adanya pemotongan pinjaman saldo SKUM kepaniteraan sebesar <strong>Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</strong>. Namun <strong className="underline">Saldo Sesungguhnya (kas riil fisik) adalah Rp {saldoSesungguhnya.toLocaleString('id-ID')} (Surplus / Kas Utuh)</strong>.
+                  </>
+                ) : (
+                  <>
+                    Total pengeluaran (Rp {totalKredit.toLocaleString('id-ID')}) melebihi total penerimaan (Rp {totalDebet.toLocaleString('id-ID')}). Terdapat defisit buku sebesar <strong className="font-black underline">Rp {Math.abs(saldoSkum).toLocaleString('id-ID')}</strong>.
+                    {effectiveUnpaidLoanAmount > 0 && (
+                      <> Setelah memperhitungkan pinjaman kepaniteraan (Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}), saldo sesungguhnya masih minus Rp {Math.abs(saldoSesungguhnya).toLocaleString('id-ID')}.</>
+                    )}
+                  </>
+                )}
+              </p>
+            </div>
           </div>
+          {effectiveUnpaidLoanAmount > 0 && (
+            <button
+              onClick={() => setIsRiwayatPinjamanModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-black bg-amber-600 hover:bg-amber-500 text-white shrink-0 shadow-xs transition-all active:scale-95 flex items-center space-x-1.5"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Cek Pinjaman ({unpaidLoans.length})</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -1656,11 +1768,17 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                     {saldoSkum < 0 ? '⚠️ Peringatan: Saldo Total SKUM Perkara Minus!' : 'ℹ️ Ringkasan Posisi Saldo SKUM Perkara'}
                   </span>
                   <p className="mt-1 leading-relaxed">
-                    Total Saldo Perkara SKUM saat ini adalah <strong className="font-mono">Rp {saldoSkum.toLocaleString('id-ID')}</strong> (Debet: Rp {totalDebet.toLocaleString('id-ID')} | Kredit: Rp {totalKredit.toLocaleString('id-ID')}). 
+                    Total Saldo Perkara SKUM saat ini adalah <strong className="font-mono">Rp {saldoSkum.toLocaleString('id-ID')}</strong> (Debet: Rp {totalDebet.toLocaleString('id-ID')} | Kredit: Rp {totalKredit.toLocaleString('id-ID')}).
+                    {effectiveUnpaidLoanAmount > 0 && (
+                      <span className="block mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-950 dark:text-amber-200">
+                        📌 <strong>Catatan Pinjaman Kepaniteraan:</strong> Terdapat pinjaman saldo SKUM yang belum kembali sebesar <strong className="font-bold text-amber-700 dark:text-amber-300">Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</strong>. 
+                        Dengan demikian, <strong className="underline font-bold text-emerald-700 dark:text-emerald-300">Saldo Sesungguhnya adalah Rp {saldoSesungguhnya.toLocaleString('id-ID')}</strong>.
+                      </span>
+                    )}
                     {monthlySkumBreakdown.filter(m => m.isMinus).length > 0 ? (
-                      <> Terdeteksi <strong className="text-rose-600 dark:text-rose-400 font-bold">{monthlySkumBreakdown.filter(m => m.isMinus).length} bulan</strong> memiliki kredit pengeluaran biaya SKUM melebihi debet panjar masuk.</>
+                      <span className="block mt-1"> Terdeteksi <strong className="text-rose-600 dark:text-rose-400 font-bold">{monthlySkumBreakdown.filter(m => m.isMinus).length} bulan</strong> memiliki kredit pengeluaran biaya SKUM melebihi debet panjar masuk.</span>
                     ) : (
-                      <> Saldo SKUM dalam posisi aman dan tercatat dengan seimbang.</>
+                      <span className="block mt-1"> Saldo SKUM dalam posisi aman dan tercatat dengan seimbang.</span>
                     )}
                   </p>
                 </div>
