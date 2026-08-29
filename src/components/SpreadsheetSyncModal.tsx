@@ -21,6 +21,7 @@ interface SpreadsheetSyncModalProps {
   syncSettings: SyncSettings;
   onSaveSyncSettings: (settings: SyncSettings) => void;
   onImportCases: (importedCases: CaseRecord[]) => void;
+  onTriggerLiveSync?: () => Promise<void>;
   theme?: 'light' | 'dark';
 }
 
@@ -30,6 +31,7 @@ export const SpreadsheetSyncModal: React.FC<SpreadsheetSyncModalProps> = ({
   syncSettings,
   onSaveSyncSettings,
   onImportCases,
+  onTriggerLiveSync,
   theme = 'light'
 }) => {
   const isLight = theme === 'light';
@@ -107,15 +109,14 @@ function setupSheets() {
     sheetBiaya.getRange('A1:I1').setFontWeight('bold').setBackground('#fef3c7');
   }
 
-  // 4. Sheet PinjamanSKUM (Pinjaman Saldo SKUM Kepaniteraan)
-  var sheetPinjam = ss.getSheetByName('PinjamanSKUM');
+  // 4. Sheet PinjamanSaldo / PinjamanSKUM (Pinjaman Saldo SKUM Kepaniteraan)
+  var sheetPinjam = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM');
   if (!sheetPinjam) {
-    sheetPinjam = ss.insertSheet('PinjamanSKUM');
+    sheetPinjam = ss.insertSheet('PinjamanSaldo');
     sheetPinjam.appendRow([
-      'ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah',
-      'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At'
+      'ID', 'Tanggal', 'Peminjam', 'Jumlah (Rp)', 'Keterangan', 'Status Lunas', 'Tanggal Lunas', 'Created At'
     ]);
-    sheetPinjam.getRange('A1:K1').setFontWeight('bold').setBackground('#fde68a');
+    sheetPinjam.getRange('A1:H1').setFontWeight('bold').setBackground('#fed7aa');
   }
 }
 
@@ -224,27 +225,45 @@ function doGet(e) {
     }
   }
 
-  // Fetch PinjamanSKUM
-  var sheetPinjam = ss.getSheetByName('PinjamanSKUM');
+  // Fetch PinjamanSaldo / PinjamanSKUM
+  var sheetPinjam = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM') || ss.getSheetByName('Pinjaman');
   var pinjamanSkum = [];
   if (sheetPinjam) {
     var dataPinjamRows = sheetPinjam.getDataRange().getValues();
+    var isPinjamanSaldo = (sheetPinjam.getName() === 'PinjamanSaldo') || (dataPinjamRows.length > 0 && String(dataPinjamRows[0][2] || '').toLowerCase().indexOf('peminjam') !== -1);
     for (var p = 1; p < dataPinjamRows.length; p++) {
       var rowP = dataPinjamRows[p];
       if (rowP[0] && String(rowP[0]).trim() !== '') {
-        pinjamanSkum.push({
-          id: String(rowP[0]),
-          tanggal: rowP[1] ? Utilities.formatDate(new Date(rowP[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
-          nomorPerkara: String(rowP[2] || 'Kepaniteraan Umum'),
-          peminjam: String(rowP[3] || ''),
-          jumlah: Number(rowP[4]) || 0,
-          keterangan: String(rowP[5] || ''),
-          status: String(rowP[6] || 'BELUM_DIBAYAR'),
-          tanggalBayar: rowP[7] ? Utilities.formatDate(new Date(rowP[7]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : undefined,
-          skumPengeluaranId: rowP[8] ? String(rowP[8]) : undefined,
-          skumPengembalianId: rowP[9] ? String(rowP[9]) : undefined,
-          createdAt: String(rowP[10] || '')
-        });
+        if (isPinjamanSaldo) {
+          var rawStatus = String(rowP[5] || 'BELUM_DIBAYAR').toLowerCase();
+          var isLunas = rawStatus.indexOf('lunas') !== -1 || rawStatus.indexOf('sudah') !== -1;
+          pinjamanSkum.push({
+            id: String(rowP[0]),
+            tanggal: rowP[1] ? Utilities.formatDate(new Date(rowP[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+            nomorPerkara: 'Kepaniteraan Umum',
+            peminjam: String(rowP[2] || 'Kepaniteraan'),
+            jumlah: Number(rowP[3]) || 0,
+            keterangan: String(rowP[4] || ''),
+            status: isLunas ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
+            statusLunas: isLunas ? 'Lunas' : 'Belum Lunas',
+            tanggalBayar: rowP[6] ? Utilities.formatDate(new Date(rowP[6]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : undefined,
+            createdAt: String(rowP[7] || '')
+          });
+        } else {
+          pinjamanSkum.push({
+            id: String(rowP[0]),
+            tanggal: rowP[1] ? Utilities.formatDate(new Date(rowP[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+            nomorPerkara: String(rowP[2] || 'Kepaniteraan Umum'),
+            peminjam: String(rowP[3] || ''),
+            jumlah: Number(rowP[4]) || 0,
+            keterangan: String(rowP[5] || ''),
+            status: String(rowP[6] || 'BELUM_DIBAYAR'),
+            tanggalBayar: rowP[7] ? Utilities.formatDate(new Date(rowP[7]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : undefined,
+            skumPengeluaranId: rowP[8] ? String(rowP[8]) : undefined,
+            skumPengembalianId: rowP[9] ? String(rowP[9]) : undefined,
+            createdAt: String(rowP[10] || '')
+          });
+        }
       }
     }
   }
@@ -255,7 +274,9 @@ function doGet(e) {
     cases: cases,
     jurnalSkum: jurnalSkum,
     biayaProses: biayaProses,
-    pinjamanSkum: pinjamanSkum
+    bukuBiayaProses: biayaProses,
+    pinjamanSkum: pinjamanSkum,
+    pinjamanSaldo: pinjamanSkum
   };
 
   return ContentService.createTextOutput(JSON.stringify(response))
@@ -454,25 +475,43 @@ function doPost(e) {
           }
         }
       }
-    } else if (action === 'add_pinjaman_skum' || action === 'update_pinjaman_skum') {
-      var sheet = ss.getSheetByName('PinjamanSKUM');
+    } else if (action === 'add_pinjaman_skum' || action === 'update_pinjaman_skum' || action === 'add_pinjaman_saldo' || action === 'update_pinjaman_saldo') {
+      var sheet = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM');
       if (!sheet) {
-        sheet = ss.insertSheet('PinjamanSKUM');
-        sheet.appendRow(['ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah', 'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At']);
+        sheet = ss.insertSheet('PinjamanSaldo');
+        sheet.appendRow(['ID', 'Tanggal', 'Peminjam', 'Jumlah (Rp)', 'Keterangan', 'Status Lunas', 'Tanggal Lunas', 'Created At']);
+        sheet.getRange('A1:H1').setFontWeight('bold').setBackground('#fed7aa');
       }
-      var rowValues = [
-        record.id || ('pinjam-' + Date.now()),
-        record.tanggal || '',
-        record.nomorPerkara || 'Kepaniteraan Umum',
-        record.peminjam || '',
-        Number(record.jumlah) || 0,
-        record.keterangan || '',
-        record.status || 'BELUM_DIBAYAR',
-        record.tanggalBayar || '',
-        record.skumPengeluaranId || '',
-        record.skumPengembalianId || '',
-        record.createdAt || new Date().toISOString()
-      ];
+
+      var isPinjamanSaldo = sheet.getName() === 'PinjamanSaldo';
+      var rowValues;
+      if (isPinjamanSaldo) {
+        var isLunas = record.status === 'SUDAH_DIBAYAR' || String(record.statusLunas || '').toLowerCase().indexOf('lunas') !== -1;
+        rowValues = [
+          record.id || ('pinjam-' + Date.now()),
+          record.tanggal || '',
+          record.peminjam || 'Kepaniteraan',
+          Number(record.jumlah || record.jumlahRp) || 0,
+          record.keterangan || 'Peminjaman Saldo SKUM',
+          isLunas ? 'Lunas' : 'Belum Lunas',
+          record.tanggalBayar || record.tanggalLunas || '',
+          record.createdAt || new Date().toISOString()
+        ];
+      } else {
+        rowValues = [
+          record.id || ('pinjam-' + Date.now()),
+          record.tanggal || '',
+          record.nomorPerkara || 'Kepaniteraan Umum',
+          record.peminjam || '',
+          Number(record.jumlah) || 0,
+          record.keterangan || '',
+          record.status || 'BELUM_DIBAYAR',
+          record.tanggalBayar || '',
+          record.skumPengeluaranId || '',
+          record.skumPengembalianId || '',
+          record.createdAt || new Date().toISOString()
+        ];
+      }
 
       var dataRows = sheet.getDataRange().getValues();
       var rowIndex = -1;
@@ -493,8 +532,8 @@ function doPost(e) {
       } else {
         sheet.appendRow(rowValues);
       }
-    } else if (action === 'delete_pinjaman_skum') {
-      var sheet = ss.getSheetByName('PinjamanSKUM');
+    } else if (action === 'delete_pinjaman_skum' || action === 'delete_pinjaman_saldo') {
+      var sheet = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM');
       if (sheet) {
         var dataRows = sheet.getDataRange().getValues();
         var targetId = String(record.id || '').trim();
@@ -603,23 +642,43 @@ function writePinjamanSkumToSheet(ss, records) {
     setSyncMessage(null);
 
     try {
-      const records = await SyncService.fetchGoogleSheetCsv(googleSheetUrl);
-      if (records.length === 0) {
-        throw new Error('Spreadsheet kosong atau format kolom tidak dikenali.');
+      if (onTriggerLiveSync) {
+        onSaveSyncSettings({
+          ...syncSettings,
+          googleSheetUrl,
+          lastSyncedAt: new Date().toISOString(),
+          syncStatus: 'syncing'
+        });
+        await onTriggerLiveSync();
+        onSaveSyncSettings({
+          ...syncSettings,
+          googleSheetUrl,
+          lastSyncedAt: new Date().toISOString(),
+          syncStatus: 'success'
+        });
+        setSyncMessage({
+          type: 'success',
+          text: 'Berhasil menyinkronkan seluruh data (Perkara, Jurnal SKUM, Biaya Proses, & Pinjaman) secara langsung dari Google Sheets!'
+        });
+      } else {
+        const records = await SyncService.fetchGoogleSheetCsv(googleSheetUrl);
+        if (records.length === 0) {
+          throw new Error('Spreadsheet kosong atau format kolom tidak dikenali.');
+        }
+
+        onImportCases(records);
+        onSaveSyncSettings({
+          ...syncSettings,
+          googleSheetUrl,
+          lastSyncedAt: new Date().toISOString(),
+          syncStatus: 'success'
+        });
+
+        setSyncMessage({
+          type: 'success',
+          text: `Berhasil sinkronisasi ${records.length} data perkara dari Google Sheets!`
+        });
       }
-
-      onImportCases(records);
-      onSaveSyncSettings({
-        ...syncSettings,
-        googleSheetUrl,
-        lastSyncedAt: new Date().toISOString(),
-        syncStatus: 'success'
-      });
-
-      setSyncMessage({
-        type: 'success',
-        text: `Berhasil sinkronisasi ${records.length} data perkara dari Google Sheets!`
-      });
     } catch (err: any) {
       setSyncMessage({
         type: 'error',

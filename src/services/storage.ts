@@ -16,6 +16,7 @@ export const INITIAL_JURNAL_SKUM_RECORDS: JurnalBiayaSkumRecord[] = [];
 export const INITIAL_PINJAMAN_SKUM_RECORDS: PinjamanSkumRecord[] = [];
 
 export const TARGET_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx_N2FEFTTruxZzyR5BzVRted8jpgE-qTSABwivhx0_s7v8aDR1VIpIsxhlABbY6jQs/exec';
+export const TARGET_SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/11YqzoHesVzx3jn_Fw_x76cs7xqpwzqazd6YP4RO5nBw/edit?usp=drive_link';
 
 export const DEFAULT_SYNC_SETTINGS: SyncSettings = {
   autoSyncEnabled: true,

@@ -10,7 +10,7 @@ import {
   PinjamanSkumRecord,
   StatusPerkara
 } from './types';
-import { StorageService, TARGET_APPS_SCRIPT_URL } from './services/storage';
+import { StorageService, TARGET_APPS_SCRIPT_URL, TARGET_SPREADSHEET_URL } from './services/storage';
 import { SyncService } from './services/syncService';
 import { Navbar } from './components/Navbar';
 import { CaseTable } from './components/CaseTable';
@@ -65,6 +65,7 @@ export default function App() {
   const [isJurnalModalOpen, setIsJurnalModalOpen] = useState(false);
   const [jurnalSelectedCase, setJurnalSelectedCase] = useState<CaseRecord | null>(null);
   const [activeToast, setActiveToast] = useState<NotificationItem | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Sanitizer to guarantee SKUM Debet/Kredit correctness and heal legacy corrupted records
   const sanitizeSkumRecords = (records: JurnalBiayaSkumRecord[]): JurnalBiayaSkumRecord[] => {
@@ -271,6 +272,7 @@ export default function App() {
 
   // Load Initial Data from Storage / Cache & merge with fresh public data / Google Sheet
   const loadDataFromSource = useCallback(async (isForceSpreadsheetOverwrite = false) => {
+    setIsRefreshing(true);
     const loadedCases = StorageService.getCases();
     const loadedBiayaProses = StorageService.getBiayaProsesRecords();
     const loadedJurnalSkum = sanitizeSkumRecords(StorageService.getJurnalSkumRecords());
@@ -287,92 +289,114 @@ export default function App() {
     setNotifications(loadedNotifs);
     setCacheMeta(StorageService.getCacheMeta());
 
-    const targetUrl = (currentSyncSettings.googleSheetUrl && currentSyncSettings.googleSheetUrl.trim().length > 0)
+    const userUrl = (currentSyncSettings.googleSheetUrl && currentSyncSettings.googleSheetUrl.trim().length > 0)
       ? currentSyncSettings.googleSheetUrl.trim()
-      : TARGET_APPS_SCRIPT_URL;
+      : '';
 
-    if (targetUrl) {
-      try {
-        if (targetUrl.includes('script.google.com')) {
-          const appsScriptData = await SyncService.fetchFromAppsScript(targetUrl);
-          if (appsScriptData && appsScriptData.cases.length > 0) {
-            let fetchedCases = appsScriptData.cases;
-            // Intelligently merge remote Jurnal SKUM with local loaded records to preserve row colors (warnaBaris)
-            let mergedJurnal: JurnalBiayaSkumRecord[] = loadedJurnalSkum;
-            if (appsScriptData.jurnalSkum && appsScriptData.jurnalSkum.length > 0) {
-              mergedJurnal = appsScriptData.jurnalSkum.map(remoteItem => {
-                const localMatch = loadedJurnalSkum.find(l => 
-                  (l.id && l.id === remoteItem.id) ||
-                  (l.nomorPerkara && l.uraian && 
-                   l.nomorPerkara.trim().toLowerCase() === remoteItem.nomorPerkara.trim().toLowerCase() && 
-                   l.uraian.trim().toLowerCase() === remoteItem.uraian.trim().toLowerCase())
-                );
+    const targetSpreadsheetUrl = userUrl.includes('docs.google.com') ? userUrl : TARGET_SPREADSHEET_URL;
+    const targetAppsScriptUrl = userUrl.includes('script.google.com') ? userUrl : TARGET_APPS_SCRIPT_URL;
 
-                let finalWarna = remoteItem.warnaBaris || 'default';
-                // If remote has no specific color but local had one saved, keep the local color
-                if (finalWarna === 'default' && localMatch && localMatch.warnaBaris && localMatch.warnaBaris !== 'default') {
-                  finalWarna = localMatch.warnaBaris;
-                }
+    try {
+      const liveData = await SyncService.fetchAllLiveSpreadsheetData({
+        spreadsheetUrl: targetSpreadsheetUrl,
+        appsScriptUrl: targetAppsScriptUrl
+      });
 
-                return {
-                  ...remoteItem,
-                  warnaBaris: finalWarna
-                };
-              });
+      if (liveData && (liveData.cases.length > 0 || liveData.jurnalSkum.length > 0 || liveData.biayaProses.length > 0)) {
+        let fetchedCases = liveData.cases;
+        // Intelligently merge remote Jurnal SKUM with local loaded records to preserve row colors (warnaBaris)
+        let mergedJurnal: JurnalBiayaSkumRecord[] = loadedJurnalSkum;
+        if (liveData.jurnalSkum && liveData.jurnalSkum.length > 0) {
+          mergedJurnal = liveData.jurnalSkum.map(remoteItem => {
+            const localMatch = loadedJurnalSkum.find(l => 
+              (l.id && l.id === remoteItem.id) ||
+              (l.nomorPerkara && l.uraian && 
+               l.nomorPerkara.trim().toLowerCase() === remoteItem.nomorPerkara.trim().toLowerCase() && 
+               l.uraian.trim().toLowerCase() === remoteItem.uraian.trim().toLowerCase())
+            );
+
+            let finalWarna = remoteItem.warnaBaris || 'default';
+            // If remote has no specific color but local had one saved, keep the local color
+            if (finalWarna === 'default' && localMatch && localMatch.warnaBaris && localMatch.warnaBaris !== 'default') {
+              finalWarna = localMatch.warnaBaris;
             }
 
-            const activeJurnal = sanitizeSkumRecords(mergedJurnal);
+            return {
+              ...remoteItem,
+              warnaBaris: finalWarna
+            };
+          });
+        }
 
-            fetchedCases = updateCasesWithSkumLogs(fetchedCases, activeJurnal);
-            const uniqueFetched = ensureUniqueCaseIds(fetchedCases);
-            setCases(uniqueFetched);
-            StorageService.saveCases(uniqueFetched);
+        const activeJurnal = sanitizeSkumRecords(mergedJurnal);
 
-            if (appsScriptData.biayaProses.length > 0) {
-              setBiayaProsesRecords(appsScriptData.biayaProses);
-              StorageService.saveBiayaProsesRecords(appsScriptData.biayaProses);
-            }
+        if (fetchedCases.length > 0) {
+          fetchedCases = updateCasesWithSkumLogs(fetchedCases, activeJurnal);
+          const uniqueFetched = ensureUniqueCaseIds(fetchedCases);
+          setCases(uniqueFetched);
+          StorageService.saveCases(uniqueFetched);
+        } else if (loadedCases.length > 0) {
+          const syncedLoaded = ensureUniqueCaseIds(updateCasesWithSkumLogs(loadedCases, activeJurnal));
+          setCases(syncedLoaded);
+          StorageService.saveCases(syncedLoaded);
+        }
 
-            if (activeJurnal.length > 0) {
-              setJurnalSkumRecords(sortSkumRecords(activeJurnal));
-              StorageService.saveJurnalSkumRecords(sortSkumRecords(activeJurnal));
-            }
+        if (liveData.biayaProses.length > 0) {
+          setBiayaProsesRecords(liveData.biayaProses);
+          StorageService.saveBiayaProsesRecords(liveData.biayaProses);
+        }
 
-            if (appsScriptData.pinjamanSkum && appsScriptData.pinjamanSkum.length > 0) {
-              setPinjamanSkumRecords(appsScriptData.pinjamanSkum);
-              StorageService.savePinjamanSkumRecords(appsScriptData.pinjamanSkum);
-            } else if (activeJurnal.length > 0) {
-              const reconstructedPinjaman = SyncService.reconstructPinjamanFromJurnal(activeJurnal);
-              if (reconstructedPinjaman.length > 0) {
-                setPinjamanSkumRecords(reconstructedPinjaman);
-                StorageService.savePinjamanSkumRecords(reconstructedPinjaman);
-              }
-            }
+        if (activeJurnal.length > 0) {
+          const sortedJurnal = sortSkumRecords(activeJurnal);
+          setJurnalSkumRecords(sortedJurnal);
+          StorageService.saveJurnalSkumRecords(sortedJurnal);
+        }
 
-            setCacheMeta(StorageService.getCacheMeta());
-          }
-        } else {
-          const casesData = await SyncService.fetchGoogleSheetCsv(targetUrl);
-          if (Array.isArray(casesData) && casesData.length > 0) {
-            const syncedCsvCases = ensureUniqueCaseIds(updateCasesWithSkumLogs(casesData, loadedJurnalSkum));
-            setCases(syncedCsvCases);
-            StorageService.saveCases(syncedCsvCases);
-          }
-
-          const logData = await SyncService.fetchGoogleSheetBiayaProsesCsv(targetUrl);
-          if (Array.isArray(logData) && logData.length > 0) {
-            setBiayaProsesRecords(logData);
-            StorageService.saveBiayaProsesRecords(logData);
+        if (liveData.pinjamanSkum && liveData.pinjamanSkum.length > 0) {
+          setPinjamanSkumRecords(liveData.pinjamanSkum);
+          StorageService.savePinjamanSkumRecords(liveData.pinjamanSkum);
+        } else if (activeJurnal.length > 0) {
+          const reconstructedPinjaman = SyncService.reconstructPinjamanFromJurnal(activeJurnal);
+          if (reconstructedPinjaman.length > 0) {
+            setPinjamanSkumRecords(reconstructedPinjaman);
+            StorageService.savePinjamanSkumRecords(reconstructedPinjaman);
           }
         }
-      } catch (err) {
-        console.warn('Gagal auto-sync Google Sheet:', err);
+
+        setCacheMeta(StorageService.getCacheMeta());
+        StorageService.saveSyncSettings({
+          ...currentSyncSettings,
+          lastSyncedAt: new Date().toISOString(),
+          syncStatus: 'success'
+        });
       }
+    } catch (err) {
+      console.warn('Gagal auto-sync Google Sheet:', err);
+    } finally {
+      setIsRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     loadDataFromSource(false);
+
+    // Auto-refresh when tab becomes active / visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadDataFromSource(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Background sync interval (every 5 minutes)
+    const intervalId = setInterval(() => {
+      loadDataFromSource(false);
+    }, 5 * 60 * 1000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(intervalId);
+    };
   }, [loadDataFromSource]);
 
   // Sync state changes to storage
@@ -1240,19 +1264,8 @@ export default function App() {
   };
 
   const handleForceReload = async () => {
-    if (syncSettings.googleSheetUrl && syncSettings.googleSheetUrl.trim().length > 0) {
-      await loadDataFromSource(true);
-      addNotification('Muat Ulang Data Terkini', 'Data telah diperbarui secara langsung dari Google Spreadsheet.', 'success');
-    } else {
-      const freshCases = StorageService.getCases();
-      const freshBiaya = StorageService.getBiayaProsesRecords();
-      const freshJurnal = StorageService.getJurnalSkumRecords();
-      setCases(freshCases);
-      setBiayaProsesRecords(freshBiaya);
-      setJurnalSkumRecords(freshJurnal);
-      setCacheMeta(StorageService.getCacheMeta());
-      addNotification('Muat Ulang Data Terkini', 'Data memori cache disinkronkan dengan basis data saat ini.', 'success');
-    }
+    await loadDataFromSource(true);
+    addNotification('Muat Ulang Data Terkini', 'Data telah diperbarui secara langsung dari Google Spreadsheet.', 'success');
   };
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
@@ -1273,6 +1286,8 @@ export default function App() {
           setIsFormOpen(true);
         }}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        onRefreshLive={handleForceReload}
+        isRefreshing={isRefreshing}
         onOpenGithubModal={() => setIsGithubModalOpen(true)}
         onOpenCacheModal={() => setIsCacheModalOpen(true)}
         onToggleNotifPopover={() => setIsNotifOpen(prev => !prev)}
@@ -1389,6 +1404,7 @@ export default function App() {
           StorageService.saveSyncSettings(newSettings);
         }}
         onImportCases={handleImportCases}
+        onTriggerLiveSync={handleForceReload}
         theme={theme}
       />
 

@@ -16,6 +16,8 @@ import { SyncSettings, CacheMetadata } from '../types';
 interface NavbarProps {
   onOpenForm: () => void;
   onOpenSyncModal: () => void;
+  onRefreshLive?: () => void;
+  isRefreshing?: boolean;
   onOpenGithubModal: () => void;
   onOpenCacheModal: () => void;
   onToggleNotifPopover: () => void;
@@ -32,6 +34,8 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   onOpenForm,
   onOpenSyncModal,
+  onRefreshLive,
+  isRefreshing = false,
   onOpenGithubModal,
   onOpenCacheModal,
   onToggleNotifPopover,
@@ -144,8 +148,43 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Action Tools & Badges */}
-          <div className="flex items-center space-x-2 sm:space-x-2.5">
+          <div className="flex items-center space-x-1.5 sm:space-x-2">
             
+            {/* Live Refresh / Sync Now Button */}
+            {onRefreshLive && (
+              <button
+                id="live-refresh-btn"
+                onClick={onRefreshLive}
+                disabled={isRefreshing}
+                title="Sinkronkan data terkini dari Google Sheets & Database (Bypass Cache)"
+                className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                  isRefreshing
+                    ? 'opacity-75 cursor-wait bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : isLight
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 hover:shadow-xs'
+                      : 'bg-emerald-950/60 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900/60'
+                }`}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{isRefreshing ? 'Menyinkronkan...' : 'Sinkronkan'}</span>
+              </button>
+            )}
+
+            {/* Google Sheets Sync Settings Button */}
+            <button
+              id="open-sync-sheets-btn"
+              onClick={onOpenSyncModal}
+              title="Pengaturan Integrasi & Sinkronisasi Google Sheets"
+              className={`hidden md:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
+                isLight
+                  ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+              }`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Spreadsheet</span>
+            </button>
+
             {/* Theme Toggle Button (Cerah / Gelap) */}
             <button
               id="theme-toggle-btn"
