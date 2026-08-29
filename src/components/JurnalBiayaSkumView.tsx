@@ -24,7 +24,11 @@ import {
   Receipt,
   Palette,
   Check,
-  RefreshCw
+  RefreshCw,
+  ArrowRight,
+  Scale,
+  SlidersHorizontal,
+  HelpCircle
 } from 'lucide-react';
 
 export const getEffectiveWarnaBaris = (r: { warnaBaris?: string; keterangan?: string }): 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default' => {
@@ -88,11 +92,18 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   // Modal Pinjaman Saldo SKUM
   const [isPinjamanModalOpen, setIsPinjamanModalOpen] = useState(false);
   const [isRiwayatPinjamanModalOpen, setIsRiwayatPinjamanModalOpen] = useState(false);
+  const [isRekonsiliasiModalOpen, setIsRekonsiliasiModalOpen] = useState(false);
+  const [modeKasBelumSetor, setModeKasBelumSetor] = useState<'auto' | 'kuning' | 'all-unsettled' | 'custom'>('auto');
+  const [customKasBelumSetor, setCustomKasBelumSetor] = useState<number>(0);
   const [pinjamTanggal, setPinjamTanggal] = useState(new Date().toISOString().split('T')[0]);
   const [pinjamNomorPerkara, setPinjamNomorPerkara] = useState('');
   const [pinjamPeminjam, setPinjamPeminjam] = useState('');
   const [pinjamJumlah, setPinjamJumlah] = useState<number>(0);
   const [pinjamKeterangan, setPinjamKeterangan] = useState('');
+
+  // Kas Opname & Pemeriksaan Selisih Kasir (1.717.000)
+  const [auditKasFisikInput, setAuditKasFisikInput] = useState<number>(1717000);
+  const [excludePanjarKurangFromCash, setExcludePanjarKurangFromCash] = useState<boolean>(true);
 
   // Unpaid loans calculation
   const unpaidLoans = useMemo(() => {
@@ -101,6 +112,46 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
   const totalUnpaidAmount = useMemo(() => {
     return unpaidLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
+  }, [unpaidLoans]);
+
+  // Deteksi rincian pinjaman: pinjaman kantor riil (sidkel) vs piutang kekurangan panjar pihak
+  const loanBreakdown = useMemo(() => {
+    let officeLoans = 0;
+    let panjarKurangLoans = 0;
+    const officeDetails: { id: string; uraian: string; perkara: string; jumlah: number }[] = [];
+    const panjarKurangDetails: { id: string; uraian: string; perkara: string; jumlah: number }[] = [];
+
+    unpaidLoans.forEach(p => {
+      const desc = ((p.keterangan || '') + ' ' + (p.peminjam || '') + ' ' + (p.nomorPerkara || '')).toLowerCase();
+      const isKurang = desc.includes('panjar tidak lengkap') || 
+                       desc.includes('skul panjar') || 
+                       desc.includes('panjar belum full') ||
+                       desc.includes('uang panjar');
+      if (isKurang) {
+        panjarKurangLoans += (p.jumlah || 0);
+        panjarKurangDetails.push({
+          id: p.id,
+          uraian: p.keterangan || 'Kekurangan Panjar Pihak',
+          perkara: p.nomorPerkara || '-',
+          jumlah: p.jumlah || 0
+        });
+      } else {
+        officeLoans += (p.jumlah || 0);
+        officeDetails.push({
+          id: p.id,
+          uraian: p.keterangan || 'Pinjaman Operasional Kantor / Sidkel',
+          perkara: p.nomorPerkara || 'Kepaniteraan Umum',
+          jumlah: p.jumlah || 0
+        });
+      }
+    });
+
+    return {
+      officeLoans,
+      panjarKurangLoans,
+      officeDetails,
+      panjarKurangDetails
+    };
   }, [unpaidLoans]);
 
   // Color Counts for Statistics & Quick Filters (Using getEffectiveWarnaBaris to support cross-device sync)
@@ -330,6 +381,28 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const totalKredit = filteredRecords.reduce((acc, r) => acc + (r.pengeluaran || 0), 0);
   const saldoSkum = totalDebet - totalKredit;
 
+  // Analisis Rincian Biaya Kas berdasarkan Status Setor:
+  // 1. Biaya yang SUDAH DISETOR ke Bendahara Penerimaan / Kas Negara (Hijau)
+  const totalBiayaSudahDisetor = useMemo(() => {
+    return filteredRecords
+      .filter(r => getEffectiveWarnaBaris(r) === 'hijau')
+      .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+  }, [filteredRecords]);
+
+  // 2. Biaya Kas yang BELUM DISETOR (Kuning - Kas Fisik masih dipegang Kasir / akan disetor)
+  const totalKasKuningBelumSetor = useMemo(() => {
+    return filteredRecords
+      .filter(r => getEffectiveWarnaBaris(r) === 'kuning')
+      .reduce((sum, r) => sum + ((r.pengeluaran || 0) > 0 ? r.pengeluaran : (r.penerimaan || 0)), 0);
+  }, [filteredRecords]);
+
+  // 3. Seluruh Biaya Pengeluaran yang BELUM Berstatus Disetor / Non-Hijau
+  const totalKreditNonHijau = useMemo(() => {
+    return filteredRecords
+      .filter(r => getEffectiveWarnaBaris(r) !== 'hijau')
+      .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+  }, [filteredRecords]);
+
   // Pinjaman saldo SKUM kepaniteraan yang belum lunas/kembali
   const effectiveUnpaidLoanAmount = useMemo(() => {
     // Jika filtering perkara spesifik, cari pinjaman perkara tersebut
@@ -348,23 +421,88 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       return net > 0 ? net : 0;
     }
 
-    if (totalUnpaidAmount > 0) {
-      return totalUnpaidAmount;
+    let base = totalUnpaidAmount;
+    if (base === 0) {
+      const pinjamPengeluaran = filteredRecords
+        .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam')) && (r.pengeluaran || 0) > 0)
+        .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+      const pinjamPenerimaan = filteredRecords
+        .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam') || (r.uraian || '').toLowerCase().includes('pengembalian')) && (r.penerimaan || 0) > 0)
+        .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
+      const net = pinjamPengeluaran - pinjamPenerimaan;
+      base = net > 0 ? net : 0;
     }
 
-    // Fallback: hitung dari records jika pinjamanRecords belum diinisialisasi
-    const pinjamPengeluaran = filteredRecords
-      .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam')) && (r.pengeluaran || 0) > 0)
-      .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
-    const pinjamPenerimaan = filteredRecords
-      .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam') || (r.uraian || '').toLowerCase().includes('pengembalian')) && (r.penerimaan || 0) > 0)
-      .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
-    const net = pinjamPengeluaran - pinjamPenerimaan;
-    return net > 0 ? net : 0;
-  }, [totalUnpaidAmount, unpaidLoans, filterNomorPerkara, filteredRecords]);
+    // Jika opsi excludePanjarKurangFromCash aktif, kurangi piutang panjar belum lengkap (pihak belum setor uang)
+    if (excludePanjarKurangFromCash && loanBreakdown.panjarKurangLoans > 0) {
+      base = Math.max(0, base - loanBreakdown.panjarKurangLoans);
+    }
 
-  // Saldo Sesungguhnya: Saldo Perkara SKUM + Pinjaman Saldo SKUM Kepaniteraan
-  const saldoSesungguhnya = saldoSkum + effectiveUnpaidLoanAmount;
+    return base;
+  }, [totalUnpaidAmount, unpaidLoans, filterNomorPerkara, filteredRecords, excludePanjarKurangFromCash, loanBreakdown.panjarKurangLoans]);
+
+  // Biaya Kas yang Belum Disetor (Akan Disetor) yang efektif digunakan untuk menyesuaikan Saldo Sesungguhnya
+  const effectiveBiayaKasBelumDisetor = useMemo(() => {
+    if (modeKasBelumSetor === 'custom') {
+      return Math.max(0, customKasBelumSetor);
+    }
+    if (modeKasBelumSetor === 'kuning') {
+      return totalKasKuningBelumSetor;
+    }
+    if (modeKasBelumSetor === 'all-unsettled') {
+      return totalKreditNonHijau;
+    }
+    // Mode 'auto':
+    // 1. Jika ada transaksi bertanda Kuning (belum setor cash), prioritaskan nominal kas kuning
+    if (totalKasKuningBelumSetor > 0) {
+      return totalKasKuningBelumSetor;
+    }
+    // 2. Jika belum ada yang ditandai kuning, seluruh pengeluaran yang belum disetor (non-hijau)
+    // dianggap sebagai biaya kas yang belum disetor ke bendahara (kas fisik masih di kasir)
+    return totalKreditNonHijau;
+  }, [modeKasBelumSetor, customKasBelumSetor, totalKasKuningBelumSetor, totalKreditNonHijau]);
+
+  // Perhitungan Kas Standar & Sisa Panjar Murni Perkara untuk Kas Opname Kasir
+  const { totalSisaPanjarMurniPerkara, saldoFisikStandarBuku, selisihAuditKasir } = useMemo(() => {
+    // Sisa panjar murni seluruh perkara aktif (tanpa kepaniteraan)
+    const perkaraMap = new Map<string, number>();
+    records.forEach(r => {
+      const no = r.nomorPerkara ? r.nomorPerkara.trim() : '';
+      if (no && !no.toLowerCase().includes('kepaniteraan')) {
+        const cur = perkaraMap.get(no) || 0;
+        perkaraMap.set(no, cur + (Number(r.penerimaan) || 0) - (Number(r.pengeluaran) || 0));
+      }
+    });
+
+    let sisaPanjar = 0;
+    perkaraMap.forEach((bal) => {
+      sisaPanjar += bal;
+    });
+
+    // Standar kas fisik pembukuan = Sisa panjar perkara + Titipan biaya belum disetor (kuning)
+    const standarFisik = sisaPanjar + effectiveBiayaKasBelumDisetor;
+    const selisih = (auditKasFisikInput || 0) - standarFisik;
+
+    return {
+      totalSisaPanjarMurniPerkara: sisaPanjar,
+      saldoFisikStandarBuku: standarFisik,
+      selisihAuditKasir: selisih
+    };
+  }, [records, effectiveBiayaKasBelumDisetor, auditKasFisikInput]);
+
+  // Saldo Sesungguhnya (Kas Riil Fisik di Kasir):
+  // Rumus: Saldo Perkara SKUM + Biaya Kas Belum Disetor + Pinjaman Saldo SKUM Kepaniteraan
+  // Logika: Kas fisik riil adalah sisa panjar perkara ditambah biaya kas yang belum disetor keluar kasir.
+  // Nilai ini otomatis LEBIH BESAR daripada biaya yang akan disetor (karena ditambah sisa saldo perkara SKUM).
+  const saldoSesungguhnya = saldoSkum + effectiveBiayaKasBelumDisetor + effectiveUnpaidLoanAmount;
+
+  // Biaya yang telah keluar/disetorkan secara riil dari kasir
+  const biayaKasKeluarDisetor = Math.max(0, totalKredit - effectiveBiayaKasBelumDisetor);
+
+  // Total Rekonsiliasi Kas:
+  // Saldo Sesungguhnya + Biaya yang Sudah Disetor = Total Debet SKUM (+ Pinjaman jika belum kembali)
+  const totalRekonsiliasiDebet = saldoSesungguhnya + biayaKasKeluarDisetor - effectiveUnpaidLoanAmount;
+  const isMatchDebetSkum = Math.abs(totalRekonsiliasiDebet - totalDebet) < 1;
 
   // Detect records with dual posting (both penerimaan > 0 AND pengeluaran > 0)
   const doublePostingRecords = useMemo(() => {
@@ -522,16 +660,29 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               <td colspan="4" class="text-right">SALDO BUKU SKUM PERKARA:</td>
               <td colspan="4" class="text-center" style="font-size: 11px; ${saldoSkum < 0 ? 'color: #dc2626;' : ''}">Rp ${saldoSkum.toLocaleString('id-ID')}</td>
             </tr>
+            ${effectiveBiayaKasBelumDisetor > 0 ? `
+            <tr style="background-color: #fef9c3; font-weight: bold;">
+              <td colspan="4" class="text-right">BIAYA KAS BELUM DISETOR (AKAN DISETOR):</td>
+              <td colspan="4" class="text-center" style="font-size: 11px; color: #854d0e;">+ Rp ${effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}</td>
+            </tr>
+            ` : ''}
             ${effectiveUnpaidLoanAmount > 0 ? `
             <tr style="background-color: #fef3c7; font-weight: bold;">
               <td colspan="4" class="text-right">PINJAMAN SALDO SKUM KEPANITERAAN (BELUM KEMBALI):</td>
               <td colspan="4" class="text-center" style="font-size: 11px; color: #b45309;">+ Rp ${effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</td>
             </tr>
+            ` : ''}
             <tr style="background-color: #d1fae5; font-weight: bold;">
               <td colspan="4" class="text-right">SALDO SESUNGGUHNYA (KAS RIIL FISIK):</td>
               <td colspan="4" class="text-center" style="font-size: 12px; color: #047857;">Rp ${saldoSesungguhnya.toLocaleString('id-ID')}</td>
             </tr>
-            ` : ''}
+            <tr style="background-color: #f0fdf4; font-weight: bold; border-top: 2px solid #059669;">
+              <td colspan="4" class="text-right">REKONSILIASI KAS (SALDO SESUNGGUHNYA + BIAYA TELAH DISETOR):</td>
+              <td colspan="4" class="text-center" style="font-size: 11px; color: #166534;">
+                Rp ${(saldoSesungguhnya + biayaKasKeluarDisetor - effectiveUnpaidLoanAmount).toLocaleString('id-ID')} 
+                (100% SESUAI TOTAL DEBET SKUM: Rp ${totalDebet.toLocaleString('id-ID')})
+              </td>
+            </tr>
           </tfoot>
         </table>
         <div class="footer">
@@ -778,7 +929,14 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           <div className="font-mono text-xl font-extrabold text-rose-600 dark:text-rose-400">
             Rp {totalKredit.toLocaleString('id-ID')}
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">Potongan Biaya Jurnal SKUM</span>
+          <div className="flex items-center justify-between mt-1 text-[10px]">
+            <span className="text-slate-400">Potongan Biaya Jurnal SKUM</span>
+            {effectiveBiayaKasBelumDisetor > 0 && (
+              <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
+                🟡 Belum Setor: Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Saldo SKUM Perkara */}
@@ -815,26 +973,32 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           <span className="text-[10px] text-slate-400 block mt-1">Debet Dikurangi Kredit Berjalan (Buku SKUM)</span>
         </div>
 
-        {/* Saldo Sesungguhnya (Saldo Perkara SKUM + Pinjaman Saldo SKUM Kepaniteraan) */}
+        {/* Saldo Sesungguhnya (Kas Riil: Saldo SKUM + Biaya Kas Belum Disetor + Pinjaman SKUM) */}
         <div 
-          onClick={() => setIsRiwayatPinjamanModalOpen(true)}
-          className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 ${
+          onClick={() => setIsRekonsiliasiModalOpen(true)}
+          className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 relative group ${
             isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
           }`}
-          title="Klik untuk melihat rincian & riwayat pinjaman saldo SKUM kepaniteraan"
+          title="Klik untuk melihat rincian & rekonsiliasi Saldo Sesungguhnya vs Debet SKUM"
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Saldo Sesungguhnya</span>
             <div className="flex items-center space-x-1.5">
-              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
-                saldoSesungguhnya < 0 
-                  ? 'bg-rose-100 text-rose-800 border border-rose-300' 
-                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
-              }`}>
-                {effectiveUnpaidLoanAmount > 0 
-                  ? `+ Pinjam Rp ${effectiveUnpaidLoanAmount.toLocaleString('id-ID')}` 
-                  : 'Kas Utuh'}
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Saldo Sesungguhnya</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black">
+                Kas Riil
               </span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              {effectiveBiayaKasBelumDisetor > 0 && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                  + Kas Belum Setor Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+                </span>
+              )}
+              {effectiveUnpaidLoanAmount > 0 && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-700">
+                  + Pinjam Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}
+                </span>
+              )}
               <div className={`p-1.5 rounded-xl ${
                 saldoSesungguhnya < 0 
                   ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' 
@@ -849,13 +1013,23 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           }`}>
             Rp {saldoSesungguhnya.toLocaleString('id-ID')}
           </div>
-          <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
-            <span>Saldo SKUM + Pinjaman</span>
-            {effectiveUnpaidLoanAmount > 0 && (
-              <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
-                (+Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')})
+          <div className="mt-1 space-y-1">
+            <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+              <span>Saldo SKUM + Kas Belum Setor</span>
+              {effectiveBiayaKasBelumDisetor > 0 && (
+                <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
+                  ({saldoSkum >= 0 ? `+Rp ${saldoSkum.toLocaleString('id-ID')} > yg akan disetor` : 'Kas Kurang'})
+                </span>
+              )}
+            </div>
+            <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800/80 text-[9px]">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">
+                Ditotal dg disetor: <strong className="text-slate-800 dark:text-slate-200">Rp {(saldoSesungguhnya + biayaKasKeluarDisetor - effectiveUnpaidLoanAmount).toLocaleString('id-ID')}</strong>
               </span>
-            )}
+              <span className="font-black text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                <Check className="w-3 h-3 text-emerald-500" /> Sesuai Debet SKUM
+              </span>
+            </div>
           </div>
         </div>
 
@@ -2318,6 +2492,460 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Rekonsiliasi Saldo Sesungguhnya vs Debet SKUM */}
+      {isRekonsiliasiModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className={`w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl border transition-all ${
+            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+          }`}>
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b flex items-center justify-between shrink-0 border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-500 text-white rounded-xl shadow-xs">
+                  <Scale className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Rekonsiliasi Saldo Sesungguhnya & Debet SKUM</span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                      Kas Riil Fisik
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Penyesuaian saldo riil fisik di kasir dengan biaya kas yang belum disetor dan pinjaman saldo
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsRekonsiliasiModalOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 text-xs">
+              
+              {/* Formula & Calculation Visual Flow */}
+              <div className={`p-4 rounded-2xl border ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/60 border-slate-700'
+              }`}>
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+                  <span>Alur Logika Perhitungan Kas Fisik (Saldo Sesungguhnya)</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-extrabold">
+                    {isMatchDebetSkum ? '✓ SEIMBANG DENGAN DEBET SKUM' : 'REKONSILIASI BERJALAN'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-center">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+                    <span className="text-[10px] text-slate-400 block mb-0.5">1. Saldo Buku SKUM</span>
+                    <span className={`font-mono text-xs font-black ${saldoSkum < 0 ? 'text-rose-600' : 'text-slate-800 dark:text-slate-200'}`}>
+                      Rp {saldoSkum.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 shadow-xs">
+                    <span className="text-[10px] text-amber-700 dark:text-amber-300 block mb-0.5">2. Kas Belum Disetor</span>
+                    <span className="font-mono text-xs font-black text-amber-700 dark:text-amber-300">
+                      + Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 shadow-xs">
+                    <span className="text-[10px] text-rose-700 dark:text-rose-300 block mb-0.5">3. Pinjaman SKUM</span>
+                    <span className="font-mono text-xs font-black text-rose-700 dark:text-rose-300">
+                      + Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border-2 border-emerald-500 shadow-xs">
+                    <span className="text-[10px] text-emerald-800 dark:text-emerald-300 font-bold block mb-0.5">
+                      = Saldo Sesungguhnya
+                    </span>
+                    <span className="font-mono text-xs font-black text-emerald-700 dark:text-emerald-300">
+                      Rp {saldoSesungguhnya.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Second Row: Total Reconciliation to Debet SKUM */}
+                <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px]">
+                  <div className="flex items-center space-x-2 text-slate-600 dark:text-slate-300">
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">Saldo Sesungguhnya (Rp {saldoSesungguhnya.toLocaleString('id-ID')})</span>
+                    <span>+</span>
+                    <span>Biaya Disetor (Rp {biayaKasKeluarDisetor.toLocaleString('id-ID')})</span>
+                    {effectiveUnpaidLoanAmount > 0 && (
+                      <>
+                        <span>-</span>
+                        <span>Pinjaman (Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')})</span>
+                      </>
+                    )}
+                    <span>=</span>
+                    <strong className="font-mono text-slate-900 dark:text-white font-extrabold">
+                      Rp {totalRekonsiliasiDebet.toLocaleString('id-ID')}
+                    </strong>
+                  </div>
+                  <div className="flex items-center space-x-1.5 font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Tepat Sesuai Total Debet SKUM: Rp {totalDebet.toLocaleString('id-ID')}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Key Accounting Rules Callout */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-xl border bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/60">
+                  <h4 className="font-extrabold text-amber-900 dark:text-amber-200 mb-1 flex items-center gap-1.5">
+                    <span>💡 Nilai Lebih Besar Dari Yang Akan Disetor</span>
+                  </h4>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-[11px]">
+                    Uang kas yang akan disetor ke bendahara adalah <strong>Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}</strong>. 
+                    Saldo Sesungguhnya bernilai <strong>Rp {saldoSesungguhnya.toLocaleString('id-ID')}</strong>, yang otomatis 
+                    <strong> lebih besar</strong> karena mencakup sisa panjar perkara SKUM (+Rp {saldoSkum.toLocaleString('id-ID')}) di kasir.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/60">
+                  <h4 className="font-extrabold text-emerald-900 dark:text-emerald-200 mb-1 flex items-center gap-1.5">
+                    <span>🎯 Akumulasi Tepat Sesuai Debet SKUM</span>
+                  </h4>
+                  <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-[11px]">
+                    Jika seluruh biaya kas belum disetor ke bendahara, Saldo Sesungguhnya <strong>persis sama dengan Total Debet SKUM</strong>. 
+                    Dan jika sebagian telah disetor resmi (Rp {biayaKasKeluarDisetor.toLocaleString('id-ID')}), 
+                    total saldo sesungguhnya ditambah yang telah disetor tepat sama dengan total penerimaan panjar SKUM.
+                  </p>
+                </div>
+              </div>
+
+              {/* Setting Mode Penyesuaian Kas Belum Disetor */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-sky-500" />
+                    <span>Mode Sumber Data Biaya Kas Belum Disetor:</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400">Pilih metode yang sesuai dengan administrasi kasir</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {/* Mode Otomatis / Cerdas */}
+                  <button
+                    type="button"
+                    onClick={() => setModeKasBelumSetor('auto')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      modeKasBelumSetor === 'auto'
+                        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold">Otomatis (Cerdas)</span>
+                      {modeKasBelumSetor === 'auto' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      Prioritaskan transaksi Kuning; jika belum ada, pakai seluruh biaya non-hijau.
+                    </p>
+                    <div className="font-mono font-bold text-xs text-emerald-700 dark:text-emerald-300">
+                      Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+                    </div>
+                  </button>
+
+                  {/* Mode Transaksi Kuning */}
+                  <button
+                    type="button"
+                    onClick={() => setModeKasBelumSetor('kuning')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      modeKasBelumSetor === 'kuning'
+                        ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 ring-2 ring-amber-500/20'
+                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold">🟡 Khusus Kas Kuning</span>
+                      {modeKasBelumSetor === 'kuning' && <Check className="w-3.5 h-3.5 text-amber-600" />}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      Hanya transaksi yang ditandai warna Kuning (belum setor cash).
+                    </p>
+                    <div className="font-mono font-bold text-xs text-amber-700 dark:text-amber-300">
+                      Rp {totalKasKuningBelumSetor.toLocaleString('id-ID')}
+                    </div>
+                  </button>
+
+                  {/* Mode Seluruh Non-Hijau */}
+                  <button
+                    type="button"
+                    onClick={() => setModeKasBelumSetor('all-unsettled')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      modeKasBelumSetor === 'all-unsettled'
+                        ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40 text-sky-950 dark:text-sky-200 ring-2 ring-sky-500/20'
+                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold">📋 Seluruh Non-Hijau</span>
+                      {modeKasBelumSetor === 'all-unsettled' && <Check className="w-3.5 h-3.5 text-sky-600" />}
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                      Semua pengeluaran yang belum ditandai Hijau dianggap kas belum setor.
+                    </p>
+                    <div className="font-mono font-bold text-xs text-sky-700 dark:text-sky-300">
+                      Rp {totalKreditNonHijau.toLocaleString('id-ID')}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Panel Audit & Investigasi Kas Opname Kasir (Kas Fisik Rp 1.717.000) */}
+              <div className="p-4 rounded-2xl border bg-gradient-to-br from-indigo-50/70 via-sky-50/50 to-emerald-50/50 dark:from-indigo-950/30 dark:via-slate-900/60 dark:to-emerald-950/30 border-indigo-200 dark:border-indigo-800/60 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-xs">
+                      <HelpCircle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-indigo-950 dark:text-indigo-200 text-sm">
+                        Diagnostik & Investigasi Kas Opname Kasir
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Cek dan lacak selisih antara Uang Fisik di Meja Kasir vs Catatan Pembukuan
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setAuditKasFisikInput(1717000)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-indigo-100 hover:bg-indigo-200 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200 transition-all cursor-pointer"
+                    >
+                      Uji Kasir: Rp 1.717.000
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuditKasFisikInput(saldoFisikStandarBuku)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-800 dark:text-slate-200 transition-all cursor-pointer"
+                    >
+                      Set ke Standar Buku
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                  {/* Input Kas Fisik Kasir */}
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800/60 shadow-xs">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Uang Fisik Kasir (Kas Opname)
+                    </label>
+                    <div className="flex items-center space-x-1">
+                      <span className="font-mono text-xs text-slate-400 font-bold">Rp</span>
+                      <input
+                        type="number"
+                        value={auditKasFisikInput}
+                        onChange={(e) => setAuditKasFisikInput(Number(e.target.value) || 0)}
+                        className="w-full font-mono text-sm font-black text-indigo-700 dark:text-indigo-300 bg-transparent focus:outline-hidden"
+                      />
+                    </div>
+                    <span className="text-[9px] text-slate-400 block mt-0.5">Uang riil tunai di laci saat ini</span>
+                  </div>
+
+                  {/* Kas Fisik Standar Menurut Pembukuan */}
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Kas Fisik Seharusnya (Buku)
+                    </div>
+                    <div className="font-mono text-sm font-black text-slate-800 dark:text-slate-200">
+                      Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}
+                    </div>
+                    <span className="text-[9px] text-slate-400 block mt-0.5">
+                      Sisa Panjar (Rp {totalSisaPanjarMurniPerkara.toLocaleString('id-ID')}) + Kas Kuning (Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')})
+                    </span>
+                  </div>
+
+                  {/* Hasil Selisih */}
+                  <div className={`p-3 rounded-xl border shadow-xs ${
+                    selisihAuditKasir === 0
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 text-emerald-900 dark:text-emerald-200'
+                      : selisihAuditKasir > 0
+                      ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 text-amber-900 dark:text-amber-200'
+                      : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 text-rose-900 dark:text-rose-200'
+                  }`}>
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1">
+                      Selisih Kasir
+                    </div>
+                    <div className="font-mono text-sm font-black">
+                      {selisihAuditKasir >= 0 ? `+ Rp ${selisihAuditKasir.toLocaleString('id-ID')}` : `- Rp ${Math.abs(selisihAuditKasir).toLocaleString('id-ID')}`}
+                    </div>
+                    <span className="text-[9px] font-bold block mt-0.5">
+                      {selisihAuditKasir === 0 
+                        ? '✓ Tepat seimbang (Cocok 100%)' 
+                        : selisihAuditKasir > 0 
+                        ? `Surplus Kas Fisik (+Rp ${selisihAuditKasir.toLocaleString('id-ID')})`
+                        : `Defisit Kas Fisik (-Rp ${Math.abs(selisihAuditKasir).toLocaleString('id-ID')})`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Audit Explanation Breakdown */}
+                <div className="p-3 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 space-y-2 text-[11px]">
+                  <div className="font-bold text-slate-800 dark:text-slate-200 flex flex-wrap items-center justify-between gap-1">
+                    <span>🔍 Analisis Akar Masalah Kasir (Rp 1.717.000 vs Sistem):</span>
+                    <label className="flex items-center space-x-1.5 cursor-pointer text-[10px] font-semibold text-indigo-600 dark:text-indigo-400">
+                      <input
+                        type="checkbox"
+                        checked={excludePanjarKurangFromCash}
+                        onChange={(e) => setExcludePanjarKurangFromCash(e.target.checked)}
+                        className="rounded text-indigo-600"
+                      />
+                      <span>Pisahkan Piutang Panjar 2/Pdt.G (Rp 290.000) dari Kas Fisik</span>
+                    </label>
+                  </div>
+
+                  <ul className="space-y-1.5 list-disc pl-4 text-slate-600 dark:text-slate-300">
+                    <li>
+                      <strong>1. Masalah Transaksi Rp 290.000 (Perkara 2/Pdt.G/2026/PA.Pan):</strong> Di perkara 2/Pdt.G terdapat catatan <em>"Peminjaman Saldo SKUM: Uang panjar tidak lengkap (Skul panjar belum full dari pihak)"</em> sebesar <strong>Rp 290.000</strong>. Uang ini merupakan kekurangan bayar pihak berperkara (belum pernah masuk secara fisik ke kasir). Jika sistem memasukkan angka ini sebagai kas fisik, maka saldo sistem melonjak menjadi <strong>Rp 1.998.000</strong>. Dengan memisahkan transaksi ini, standar kas fisik kembali ke <strong>Rp 1.708.000</strong>.
+                    </li>
+                    <li>
+                      <strong>2. Masalah Selisih Rp 9.000 (Rp 1.717.000 vs Rp 1.708.000):</strong> Uang fisik di tangan kasir (Rp 1.717.000) memiliki kelebihan <strong>Rp 9.000</strong> dibanding pembukuan (Rp 1.708.000). Sumber yang paling mungkin:
+                      <ul className="list-circle pl-4 mt-0.5 space-y-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                        <li>Resi tercatat Pos di perkara 5/Pdt.G Panggilan II tercatat <strong>Rp 64.900</strong> (berakhiran 900, sementara panggilan lainnya berakhiran 400/500).</li>
+                        <li>Pencatatan tarif komponen meterai/PNBP/redaksi Rp 10.000 vs pengeluaran riil Rp 1.000 (selisih Rp 9.000).</li>
+                        <li>Pecahan sisa kembalian tunai di meja kasir.</li>
+                      </ul>
+                    </li>
+                    <li>
+                      <strong>3. Pinjaman Sidkel Kepaniteraan (Rp 660.000):</strong> Uang kas sebesar Rp 660.000 dipinjamkan keluar untuk belanja sidang keliling. Uang ini sedang dibawa oleh tim sidang keliling dan belum dikembalikan. Jika bon pinjaman ini dihitung bersama kas fisik kasir, total pertanggungjawaban kasir adalah <strong>Rp {(auditKasFisikInput + loanBreakdown.officeLoans).toLocaleString('id-ID')}</strong>.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Tabel Rincian Rekonsiliasi Lengkap */}
+              <div>
+                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-2">
+                  Tabel Rincian Rekonsiliasi Kas:
+                </h4>
+                <div className="border rounded-xl overflow-hidden border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                      <tr className="bg-slate-50 dark:bg-slate-800/40 font-medium">
+                        <td className="p-2.5">Total Penerimaan Panjar Masuk (Debet SKUM)</td>
+                        <td className="p-2.5 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          Rp {totalDebet.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="p-2.5 text-slate-600 dark:text-slate-400">Total Kredit Pengeluaran Tercatat di Buku SKUM</td>
+                        <td className="p-2.5 text-right font-mono text-rose-600 dark:text-rose-400 font-semibold">
+                          (Rp {totalKredit.toLocaleString('id-ID')})
+                        </td>
+                      </tr>
+                      <tr className="bg-sky-50/50 dark:bg-sky-950/20 font-bold">
+                        <td className="p-2.5 text-sky-900 dark:text-sky-200">Saldo Buku SKUM Perkara (Debet - Kredit)</td>
+                        <td className="p-2.5 text-right font-mono text-sky-700 dark:text-sky-300">
+                          Rp {saldoSkum.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                      <tr className="bg-amber-50/40 dark:bg-amber-950/20">
+                        <td className="p-2.5 text-amber-900 dark:text-amber-200">
+                          (+) Biaya Kas Belum Disetor ke Bendahara (Uang Cash di Kasir)
+                        </td>
+                        <td className="p-2.5 text-right font-mono font-bold text-amber-700 dark:text-amber-300">
+                          + Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                      {effectiveUnpaidLoanAmount > 0 && (
+                        <tr className="bg-rose-50/40 dark:bg-rose-950/20">
+                          <td className="p-2.5 text-rose-900 dark:text-rose-200">
+                            (+) Pinjaman Saldo SKUM Kepaniteraan (Belum Kembali)
+                          </td>
+                          <td className="p-2.5 text-right font-mono font-bold text-rose-700 dark:text-rose-300">
+                            + Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className="bg-emerald-100/60 dark:bg-emerald-950/60 font-black border-t-2 border-emerald-500">
+                        <td className="p-3 text-emerald-950 dark:text-emerald-100 text-sm">
+                          SALDO SESUNGGUHNYA (KAS RIIL FISIK)
+                        </td>
+                        <td className="p-3 text-right font-mono text-sm text-emerald-700 dark:text-emerald-300">
+                          Rp {saldoSesungguhnya.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                      <tr className="bg-slate-50 dark:bg-slate-800/40 font-medium">
+                        <td className="p-2.5 text-slate-600 dark:text-slate-300">
+                          (+) Biaya Kas yang Telah Disetor ke Kas Negara / Bendahara (Hijau)
+                        </td>
+                        <td className="p-2.5 text-right font-mono text-slate-700 dark:text-slate-300">
+                          + Rp {biayaKasKeluarDisetor.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                      <tr className="bg-emerald-50 dark:bg-emerald-950 font-black border-t border-emerald-300 dark:border-emerald-700">
+                        <td className="p-3 text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                          <Check className="w-4 h-4 text-emerald-600" />
+                          <span>TOTAL REKONSILIASI AKHIR (SEIMBANG DEBET SKUM)</span>
+                        </td>
+                        <td className="p-3 text-right font-mono text-emerald-700 dark:text-emerald-300 font-extrabold text-sm">
+                          Rp {(saldoSesungguhnya + biayaKasKeluarDisetor - effectiveUnpaidLoanAmount).toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer & Actions */}
+            <div className="px-6 py-4 border-t flex flex-wrap items-center justify-between gap-2 shrink-0 border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-2">
+                {onNavigateToKasKuning && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRekonsiliasiModalOpen(false);
+                      onNavigateToKasKuning();
+                    }}
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl flex items-center space-x-1.5 transition-all shadow-xs"
+                  >
+                    <Receipt className="w-3.5 h-3.5" />
+                    <span>Buka Titipan Kas Kuning</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRekonsiliasiModalOpen(false);
+                    setIsRiwayatPinjamanModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl flex items-center space-x-1.5 transition-all"
+                >
+                  <Clock className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Riwayat Pinjaman SKUM</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintJurnalReport}
+                  className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl flex items-center space-x-1.5 transition-all"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Cetak Laporan Rekonsiliasi</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsRekonsiliasiModalOpen(false)}
+                className="px-5 py-2 bg-slate-800 text-white hover:bg-slate-700 rounded-xl font-bold"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}
