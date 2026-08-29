@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Zap,
   Table,
+  Smartphone,
   Download,
   Copy,
   CheckCircle,
@@ -123,6 +124,14 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
   };
 
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // View Mode: otomatis 'mobile' pada layar HP (< 768px), atau switchable 'table'
+  const [viewMode, setViewMode] = useState<'mobile' | 'table'>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768 ? 'mobile' : 'table';
+    }
+    return 'table';
+  });
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isPrintJurnalModalOpen, setIsPrintJurnalModalOpen] = useState<boolean>(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
@@ -944,7 +953,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
         isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
       }`}>
         
-        <div className={`px-5 py-3 border-b flex items-center justify-between ${
+        <div className={`px-4 sm:px-5 py-3 border-b flex flex-wrap items-center justify-between gap-2 ${
           isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/50 border-slate-800'
         }`}>
           <div className="flex items-center space-x-2">
@@ -953,93 +962,279 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
               Log Transaksi Buku Bantu Biaya Proses ({selectedMonth === 'ALL' ? 'Tahun 2026' : `Bulan ${selectedMonth} 2026`})
             </h3>
           </div>
-          <span className={`text-xs font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-            Total {filteredRecords.length} Transaksi
-          </span>
+          
+          <div className="flex items-center space-x-2">
+            <span className={`text-xs font-medium ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+              {filteredRecords.length} Transaksi
+            </span>
+
+            {/* View Mode Toggle: Kartu HP vs Tabel */}
+            <div className="flex items-center space-x-1 p-1 rounded-xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('mobile')}
+                className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                  viewMode === 'mobile'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Tampilan Khusus Mobile / HP (Bebas Geser, Mudah Dibaca)"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>📱 Kartu HP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                  viewMode === 'table'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Tampilan Tabel Standar Lebar"
+              >
+                <Table className="w-3.5 h-3.5" />
+                <span>🖥️ Tabel</span>
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className={`border-b font-extrabold uppercase tracking-wider ${
-              isLight ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-800/80 text-slate-300 border-slate-700'
+        {/* View Mode: Mobile Cards vs Standard Table */}
+        {viewMode === 'mobile' ? (
+          <div className="p-3 sm:p-4 space-y-3">
+            {filteredRecords.length === 0 ? (
+              <div className={`text-center py-10 px-4 rounded-xl border ${
+                isLight ? 'bg-slate-50 border-slate-200 text-slate-500' : 'bg-slate-800/40 border-slate-800 text-slate-400'
+              }`}>
+                <BookOpen className="w-8 h-8 mx-auto text-amber-500/60 mb-2" />
+                <p className="font-bold text-sm">Belum ada log transaksi untuk bulan {selectedMonth}</p>
+                <p className="text-xs mt-1">Gunakan tombol "+ Log Transaksi" atau "Potong ATK Perkara" untuk menambah data.</p>
+              </div>
+            ) : (
+              filteredRecords.map((item, idx) => (
+                <div
+                  key={`mobile-proses-${item.id}-${idx}`}
+                  className={`p-4 rounded-2xl border transition-all shadow-xs space-y-3 ${
+                    isLight 
+                      ? 'bg-white border-slate-200 hover:border-amber-300' 
+                      : 'bg-slate-900 border-slate-800 hover:border-amber-800'
+                  }`}
+                >
+                  {/* Top Row: No, Tanggal & Nomor Perkara */}
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+                    <div>
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                        #{idx + 1} • {formatShortDate(item.tanggal)}
+                      </span>
+                      <div className="font-mono text-sm sm:text-base font-black text-amber-700 dark:text-amber-400 mt-0.5">
+                        {item.nomorPerkara}
+                      </div>
+                    </div>
+
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 ${
+                      item.penerimaan > 0
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                        : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                    }`}>
+                      {item.penerimaan > 0 ? 'Penerimaan' : 'Pengeluaran'}
+                    </span>
+                  </div>
+
+                  {/* Uraian Transaksi */}
+                  <div>
+                    <div className="font-bold text-sm leading-snug text-slate-900 dark:text-slate-100">
+                      {item.uraian}
+                    </div>
+                    {item.keterangan && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic">
+                        "{item.keterangan}"
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Nominal Box */}
+                  <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/60 border-slate-700'
+                  }`}>
+                    {item.penerimaan > 0 ? (
+                      <div>
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Penerimaan (Potongan ATK)
+                        </div>
+                        <div className="font-mono text-base font-black text-emerald-700 dark:text-emerald-400">
+                          + {formatRupiah(item.penerimaan)}
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Pengeluaran (Biaya / Belanja)
+                        </div>
+                        <div className="font-mono text-base font-black text-rose-600 dark:text-rose-400">
+                          - {formatRupiah(item.pengeluaran)}
+                        </div>
+                      </div>
+                    )}
+
+                    {item.kategori && (
+                      <div className="text-right">
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Kategori
+                        </div>
+                        <span className="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
+                          {item.kategori}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div className="flex items-center justify-end space-x-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAddModal(item)}
+                      className={`min-h-[38px] px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center space-x-1.5 transition-all ${
+                        isLight 
+                          ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200' 
+                          : 'bg-slate-800 hover:bg-amber-950/40 text-amber-300 border-slate-700'
+                      }`}
+                      title="Edit Log Transaksi"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit Transaksi</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm('Hapus log transaksi ini dari Buku Bantu Biaya Proses?')) {
+                          onDeleteRecord(item.id);
+                        }
+                      }}
+                      className="min-h-[38px] px-3 py-1.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center space-x-1"
+                      title="Hapus Log Transaksi"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span className="text-xs font-bold">Hapus</span>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {/* Mobile Total Biaya Proses Summary Card */}
+            <div className={`p-4 rounded-2xl border shadow-sm ${
+              isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
             }`}>
-              <tr>
-                <th className="px-3 py-3 text-center w-12">NO</th>
-                <th className="px-3 py-3 w-28">TANGGAL</th>
-                <th className="px-3 py-3 w-44">NOMOR PERKARA</th>
-                <th className="px-4 py-3">URAIAN</th>
-                <th className="px-4 py-3 text-right w-36">PENERIMAAN (RP)</th>
-                <th className="px-4 py-3 text-right w-36">PENGELUARAN (RP)</th>
-                <th className="px-3 py-3 w-32">KET</th>
-                <th className="px-3 py-3 text-center w-20">AKSI</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y ${isLight ? 'divide-slate-200 bg-white' : 'divide-slate-800 bg-slate-900/40'}`}>
-              {filteredRecords.length === 0 ? (
+              <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-2">
+                Total Akumulasi Bulan {selectedMonth}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50">
+                  <div className="text-[10px] text-emerald-800 dark:text-emerald-400 font-bold">Total Penerimaan</div>
+                  <div className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-300">
+                    {formatRupiah(totalPenerimaan)}
+                  </div>
+                </div>
+                <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50">
+                  <div className="text-[10px] text-rose-800 dark:text-rose-400 font-bold">Total Pengeluaran</div>
+                  <div className="font-mono text-sm font-black text-rose-700 dark:text-rose-300">
+                    {formatRupiah(totalPengeluaran)}
+                  </div>
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex items-center justify-between">
+                <span className="font-bold text-xs text-amber-900 dark:text-amber-200">Saldo Biaya Proses:</span>
+                <span className="font-mono font-black text-base text-amber-800 dark:text-amber-300">
+                  {formatRupiah(saldoBiayaProses)}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className={`border-b font-extrabold uppercase tracking-wider ${
+                isLight ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-800/80 text-slate-300 border-slate-700'
+              }`}>
                 <tr>
-                  <td colSpan={8} className={`text-center py-12 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Belum ada log transaksi untuk bulan {selectedMonth}. Gunakan tombol "+ Log Transaksi" atau "Potong ATK Perkara" untuk menambah data.
-                  </td>
+                  <th className="px-3 py-3 text-center w-12">NO</th>
+                  <th className="px-3 py-3 w-28">TANGGAL</th>
+                  <th className="px-3 py-3 w-44">NOMOR PERKARA</th>
+                  <th className="px-4 py-3">URAIAN</th>
+                  <th className="px-4 py-3 text-right w-36">PENERIMAAN (RP)</th>
+                  <th className="px-4 py-3 text-right w-36">PENGELUARAN (RP)</th>
+                  <th className="px-3 py-3 w-32">KET</th>
+                  <th className="px-3 py-3 text-center w-20">AKSI</th>
                 </tr>
-              ) : (
-                filteredRecords.map((item, idx) => (
-                  <tr key={`${item.id}-${idx}`} className={`transition-colors ${isLight ? 'hover:bg-amber-50/40' : 'hover:bg-slate-800/60'}`}>
-                    <td className={`px-3 py-2.5 text-center font-bold ${isLight ? 'text-slate-400' : 'text-slate-400'}`}>{idx + 1}</td>
-                    <td className={`px-3 py-2.5 font-mono ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>{formatShortDate(item.tanggal)}</td>
-                    <td className="px-3 py-2.5 font-mono font-extrabold text-amber-700">{item.nomorPerkara}</td>
-                    <td className={`px-4 py-2.5 font-semibold ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>{item.uraian}</td>
-                    <td className="px-4 py-2.5 text-right font-extrabold text-emerald-700">
-                      {item.penerimaan > 0 ? formatRupiah(item.penerimaan) : '-'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-extrabold text-rose-700">
-                      {item.pengeluaran > 0 ? formatRupiah(item.pengeluaran) : '-'}
-                    </td>
-                    <td className={`px-3 py-2.5 text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{item.keterangan || '-'}</td>
-                    <td className="px-3 py-2.5 text-center space-x-1">
-                      <button
-                        onClick={() => handleOpenAddModal(item)}
-                        className={`p-1 rounded transition-colors ${
-                          isLight ? 'bg-amber-100 hover:bg-amber-200 text-amber-800' : 'bg-slate-800 hover:bg-slate-700 text-amber-400'
-                        }`}
-                        title="Edit Log Transaksi"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm('Hapus log transaksi ini dari Buku Bantu Biaya Proses?')) {
-                            onDeleteRecord(item.id);
-                          }
-                        }}
-                        className={`p-1 rounded transition-colors ${
-                          isLight ? 'bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700' : 'bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400'
-                        }`}
-                        title="Hapus Log Transaksi"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+              </thead>
+              <tbody className={`divide-y ${isLight ? 'divide-slate-200 bg-white' : 'divide-slate-800 bg-slate-900/40'}`}>
+                {filteredRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className={`text-center py-12 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                      Belum ada log transaksi untuk bulan {selectedMonth}. Gunakan tombol "+ Log Transaksi" atau "Potong ATK Perkara" untuk menambah data.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-            {/* Table Footer Totals */}
-            <tfoot className={`font-bold border-t-2 ${
-              isLight ? 'bg-slate-100 border-slate-300 text-slate-900' : 'bg-slate-800/90 border-slate-700 text-slate-100'
-            }`}>
-              <tr>
-                <td colSpan={4} className="px-4 py-3 text-right uppercase tracking-wider">
-                  JUMLAH TOTAL BULAN {selectedMonth}:
-                </td>
-                <td className="px-4 py-3 text-right text-emerald-700 font-black">{formatRupiah(totalPenerimaan)}</td>
-                <td className="px-4 py-3 text-right text-rose-700 font-black">{formatRupiah(totalPengeluaran)}</td>
-                <td colSpan={2} className="px-3 py-3 text-amber-700 text-center font-black">
-                  SALDO: {formatRupiah(saldoBiayaProses)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+                ) : (
+                  filteredRecords.map((item, idx) => (
+                    <tr key={`${item.id}-${idx}`} className={`transition-colors ${isLight ? 'hover:bg-amber-50/40' : 'hover:bg-slate-800/60'}`}>
+                      <td className={`px-3 py-2.5 text-center font-bold ${isLight ? 'text-slate-400' : 'text-slate-400'}`}>{idx + 1}</td>
+                      <td className={`px-3 py-2.5 font-mono ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>{formatShortDate(item.tanggal)}</td>
+                      <td className="px-3 py-2.5 font-mono font-extrabold text-amber-700">{item.nomorPerkara}</td>
+                      <td className={`px-4 py-2.5 font-semibold ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>{item.uraian}</td>
+                      <td className="px-4 py-2.5 text-right font-extrabold text-emerald-700">
+                        {item.penerimaan > 0 ? formatRupiah(item.penerimaan) : '-'}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-extrabold text-rose-700">
+                        {item.pengeluaran > 0 ? formatRupiah(item.pengeluaran) : '-'}
+                      </td>
+                      <td className={`px-3 py-2.5 text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>{item.keterangan || '-'}</td>
+                      <td className="px-3 py-2.5 text-center space-x-1">
+                        <button
+                          onClick={() => handleOpenAddModal(item)}
+                          className={`p-1 rounded transition-colors ${
+                            isLight ? 'bg-amber-100 hover:bg-amber-200 text-amber-800' : 'bg-slate-800 hover:bg-slate-700 text-amber-400'
+                          }`}
+                          title="Edit Log Transaksi"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm('Hapus log transaksi ini dari Buku Bantu Biaya Proses?')) {
+                              onDeleteRecord(item.id);
+                            }
+                          }}
+                          className={`p-1 rounded transition-colors ${
+                            isLight ? 'bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700' : 'bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400'
+                          }`}
+                          title="Hapus Log Transaksi"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {/* Table Footer Totals */}
+              <tfoot className={`font-bold border-t-2 ${
+                isLight ? 'bg-slate-100 border-slate-300 text-slate-900' : 'bg-slate-800/90 border-slate-700 text-slate-100'
+              }`}>
+                <tr>
+                  <td colSpan={4} className="px-4 py-3 text-right uppercase tracking-wider">
+                    JUMLAH TOTAL BULAN {selectedMonth}:
+                  </td>
+                  <td className="px-4 py-3 text-right text-emerald-700 font-black">{formatRupiah(totalPenerimaan)}</td>
+                  <td className="px-4 py-3 text-right text-rose-700 font-black">{formatRupiah(totalPengeluaran)}</td>
+                  <td colSpan={2} className="px-3 py-3 text-amber-700 text-center font-black">
+                    SALDO: {formatRupiah(saldoBiayaProses)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
 
       </div>
 

@@ -28,7 +28,9 @@ import {
   ArrowRight,
   Scale,
   SlidersHorizontal,
-  HelpCircle
+  HelpCircle,
+  Smartphone,
+  Table
 } from 'lucide-react';
 
 export const getEffectiveWarnaBaris = (r: { warnaBaris?: string; keterangan?: string }): 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default' => {
@@ -88,6 +90,14 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [filterTahun, setFilterTahun] = useState<string>(new Date().getFullYear().toString());
   const [filterWarna, setFilterWarna] = useState<string>('ALL');
   const [sortDirection, setSortDirection] = useState<'ASC' | 'DESC'>('ASC');
+
+  // View Mode: otomatis 'mobile' pada layar HP (< 768px), atau switchable 'table'
+  const [viewMode, setViewMode] = useState<'mobile' | 'table'>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768 ? 'mobile' : 'table';
+    }
+    return 'table';
+  });
 
   // Modal Pinjaman Saldo SKUM
   const [isPinjamanModalOpen, setIsPinjamanModalOpen] = useState(false);
@@ -1331,240 +1341,552 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             <option value="ASC">Urutan: Tanggal (Terlama ke Terbaru)</option>
             <option value="DESC">Urutan: Tanggal (Terbaru ke Terlama)</option>
           </select>
+
+          {/* View Mode Toggle: Kartu HP vs Tabel */}
+          <div className="flex items-center space-x-1 p-1 rounded-xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('mobile')}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                viewMode === 'mobile'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Tampilan Khusus Mobile / HP (Bebas Geser, Mudah Dibaca)"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>📱 Kartu HP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                viewMode === 'table'
+                  ? 'bg-sky-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Tampilan Tabel Standar Lebar"
+            >
+              <Table className="w-3.5 h-3.5" />
+              <span>🖥️ Tabel</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Main Journal Data Table */}
-      <div className={`rounded-2xl border overflow-hidden shadow-sm ${
-        isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
-      }`}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className={`border-b font-extrabold uppercase text-[10px] tracking-wider ${
-                isLight ? 'bg-slate-100 text-slate-700' : 'bg-slate-800 text-slate-300'
-              }`}>
-                <th className="p-3 text-center w-10">No</th>
-                <th className="p-3 w-28">Tanggal</th>
-                <th className="p-3 w-44">Nomor Perkara</th>
-                <th className="p-3">Uraian Transaksi SKUM</th>
-                <th className="p-3 text-right w-32">Debet (Panjar)</th>
-                <th className="p-3 text-right w-32">Kredit (Pengeluaran)</th>
-                <th className="p-3 text-center w-36">Kategori & Status</th>
-                <th className="p-3 text-center w-36">Pilih Warna Baris</th>
-                <th className="p-3 text-center w-20">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-sans">
-              {filteredRecords.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400">
-                    <div className="max-w-xs mx-auto space-y-2">
-                      <BookOpen className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
-                      <p className="font-bold text-sm text-slate-600 dark:text-slate-300">Belum Ada Data Jurnal SKUM</p>
-                      <p className="text-xs text-slate-400">
-                        Pilih menu "Pencatatan Jurnal Otomatis" atau "+ Log SKUM Manual" untuk menambahkan rincian.
-                      </p>
+      {/* Main Journal Display: Mobile Cards or Wide Table */}
+      {viewMode === 'mobile' ? (
+        <div className="space-y-3">
+          {filteredRecords.length === 0 ? (
+            <div className={`p-8 rounded-2xl border text-center ${
+              isLight ? 'bg-white border-slate-200 text-slate-400' : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}>
+              <BookOpen className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
+              <p className="font-bold text-sm text-slate-600 dark:text-slate-300">Belum Ada Data Jurnal SKUM</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Pilih menu "Pencatatan Jurnal Otomatis" atau "+ Log SKUM Manual" untuk menambahkan rincian.
+              </p>
+            </div>
+          ) : (
+            filteredRecords.map((r, idx) => {
+              const warna = getEffectiveWarnaBaris(r);
+              let cardColorClass = '';
+              if (warna === 'hijau') {
+                cardColorClass = isLight 
+                  ? 'bg-emerald-50/80 border-emerald-300 dark:border-emerald-700' 
+                  : 'bg-emerald-950/30 border-emerald-700/80';
+              } else if (warna === 'kuning') {
+                cardColorClass = isLight 
+                  ? 'bg-amber-50/90 border-amber-300 dark:border-amber-700' 
+                  : 'bg-amber-950/35 border-amber-600/80';
+              } else if (warna === 'merah') {
+                cardColorClass = isLight 
+                  ? 'bg-rose-50/80 border-rose-300 dark:border-rose-700' 
+                  : 'bg-rose-950/30 border-rose-700/80';
+              } else if (warna === 'oranye') {
+                cardColorClass = isLight 
+                  ? 'bg-amber-50/80 border-amber-300 dark:border-amber-700' 
+                  : 'bg-amber-950/30 border-amber-600/80';
+              } else {
+                cardColorClass = isLight
+                  ? 'bg-white border-slate-200 hover:border-slate-300'
+                  : 'bg-slate-900 border-slate-800 hover:border-slate-700';
+              }
+
+              const cleanKet = stripWarnaTag(r.keterangan);
+
+              return (
+                <div 
+                  key={`mobile-skum-${r.id}-${idx}`}
+                  className={`p-4 rounded-2xl border transition-all shadow-xs space-y-3 ${cardColorClass}`}
+                >
+                  {/* Top Row: No, Tanggal & Nomor Perkara */}
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-200/60 dark:border-slate-800/60 pb-2">
+                    <div>
+                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400">
+                        #{idx + 1} • {r.tanggal || '-'}
+                      </span>
+                      <div className="font-mono text-sm sm:text-base font-black text-sky-800 dark:text-sky-300 mt-0.5">
+                        {r.nomorPerkara}
+                      </div>
                     </div>
+
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
+                      r.kategori === 'Panjar' 
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800' 
+                        : r.kategori === 'ATK'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                    }`}>
+                      {r.kategori}
+                    </span>
+                  </div>
+
+                  {/* Status Banner */}
+                  {warna === 'hijau' && (
+                    <div className="flex items-center space-x-1 text-xs font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100/70 dark:bg-emerald-950/60 px-2.5 py-1 rounded-xl border border-emerald-300/80 dark:border-emerald-800">
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      <span>🟢 Sudah Disetor ke Bendahara</span>
+                    </div>
+                  )}
+                  {warna === 'kuning' && (
+                    <div className="flex items-center justify-between gap-1 text-xs font-black text-amber-900 dark:text-amber-200 bg-amber-200/80 dark:bg-amber-950/60 px-2.5 py-1 rounded-xl border border-amber-400 dark:border-amber-700">
+                      <div className="flex items-center space-x-1">
+                        <span className="w-2 h-2 rounded-full bg-amber-600 animate-pulse"></span>
+                        <span>🟡 Belum Setor Cash (Uang Masih di Kasir)</span>
+                      </div>
+                      {onNavigateToKasKuning && (
+                        <button
+                          type="button"
+                          onClick={onNavigateToKasKuning}
+                          className="px-2 py-0.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[10px] shadow-2xs"
+                        >
+                          Cetak Kuitansi
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {warna === 'merah' && (
+                    <div className="flex items-center space-x-1 text-xs font-black text-rose-700 dark:text-rose-300 bg-rose-100/80 dark:bg-rose-950/60 px-2.5 py-1 rounded-xl border border-rose-300 dark:border-rose-800">
+                      <span>🔴 Pinjaman Saldo SKUM</span>
+                    </div>
+                  )}
+                  {warna === 'oranye' && (
+                    <div className="flex items-center space-x-1 text-xs font-black text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/60 px-2.5 py-1 rounded-xl border border-amber-300 dark:border-amber-800">
+                      <span>🟠 Dalam Proses</span>
+                    </div>
+                  )}
+
+                  {/* Uraian Transaksi */}
+                  <div>
+                    <div className="font-bold text-sm leading-snug text-slate-900 dark:text-slate-100">
+                      {r.uraian}
+                    </div>
+                    {cleanKet && (
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 italic">
+                        "{cleanKet}"
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Nominal Strip (Debet / Kredit) */}
+                  <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                    isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-slate-800/60 border-slate-700'
+                  }`}>
+                    {r.penerimaan > 0 ? (
+                      <div>
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Penerimaan (Debet)
+                        </div>
+                        <div className="font-mono text-base font-black text-emerald-700 dark:text-emerald-400">
+                          + Rp {r.penerimaan.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Pengeluaran (Kredit)
+                        </div>
+                        <div className="font-mono text-base font-black text-rose-600 dark:text-rose-400">
+                          - Rp {r.pengeluaran.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="text-right">
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Kategori
+                      </div>
+                      <div className="font-bold text-xs text-slate-700 dark:text-slate-300">
+                        {r.kategori}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions & Color Status Selector (Touch Friendly) */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    {/* Interactive Color Status Dots */}
+                    <div className="flex items-center space-x-1.5 p-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSetColor(r, 'hijau')}
+                        className={`w-6 h-6 rounded-full bg-emerald-500 hover:bg-emerald-600 transition-all flex items-center justify-center ${
+                          warna === 'hijau' ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-60 hover:opacity-100'
+                        }`}
+                        title="Tandai Hijau (Sudah Disetor ke Bendahara)"
+                      >
+                        {warna === 'hijau' && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSetColor(r, 'kuning')}
+                        className={`w-6 h-6 rounded-full bg-amber-400 hover:bg-amber-500 border border-amber-600 transition-all flex items-center justify-center ${
+                          warna === 'kuning' ? 'ring-2 ring-amber-600 ring-offset-1 scale-110 shadow-xs' : 'opacity-60 hover:opacity-100'
+                        }`}
+                        title="Tandai Kuning (Belum Setor Cash / Uang di Kasir)"
+                      >
+                        {warna === 'kuning' && <span className="w-2 h-2 rounded-full bg-slate-950"></span>}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSetColor(r, 'merah')}
+                        className={`w-6 h-6 rounded-full bg-rose-500 hover:bg-rose-600 transition-all flex items-center justify-center ${
+                          warna === 'merah' ? 'ring-2 ring-rose-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-60 hover:opacity-100'
+                        }`}
+                        title="Tandai Merah (Pinjaman Saldo)"
+                      >
+                        {warna === 'merah' && <span className="w-2 h-2 rounded-full bg-white"></span>}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSetColor(r, 'oranye')}
+                        className={`w-6 h-6 rounded-full bg-amber-500 hover:bg-amber-600 transition-all flex items-center justify-center ${
+                          warna === 'oranye' ? 'ring-2 ring-amber-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-60 hover:opacity-100'
+                        }`}
+                        title="Tandai Oranye (Proses)"
+                      >
+                        {warna === 'oranye' && <span className="w-2 h-2 rounded-full bg-white"></span>}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleQuickSetColor(r, 'default')}
+                        className={`w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600 transition-all flex items-center justify-center ${
+                          warna === 'default' ? 'ring-2 ring-slate-400' : 'opacity-50 hover:opacity-100'
+                        }`}
+                        title="Reset warna ke normal"
+                      >
+                        <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300">✕</span>
+                      </button>
+                    </div>
+
+                    {/* Edit & Delete Action Buttons */}
+                    <div className="flex items-center space-x-1">
+                      {warna === 'kuning' && onNavigateToKasKuning && (
+                        <button
+                          type="button"
+                          onClick={onNavigateToKasKuning}
+                          className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center space-x-1 shadow-xs hover:bg-amber-600 active:scale-95 transition-all"
+                          title="Cetak Kuitansi Tanda Terima Kas Kuning"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                          <span>Kuitansi</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(r)}
+                        className={`min-h-[36px] px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center space-x-1 transition-all ${
+                          isLight 
+                            ? 'bg-slate-100 hover:bg-sky-50 text-slate-700 hover:text-sky-700 border-slate-200 hover:border-sky-300' 
+                            : 'bg-slate-800 hover:bg-sky-950/40 text-slate-300 hover:text-sky-300 border-slate-700'
+                        }`}
+                        title="Edit log SKUM ini"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteRecord(r.id)}
+                        className="min-h-[36px] px-2.5 py-1.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center"
+                        title="Hapus baris ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              );
+            })
+          )}
+
+          {/* Mobile Total SKUM Summary Card */}
+          <div className={`p-4 rounded-2xl border shadow-sm ${
+            isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+          }`}>
+            <div className="text-xs font-extrabold uppercase tracking-wider text-slate-500 mb-2">
+              Ringkasan Akumulasi SKUM
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+              <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50">
+                <div className="text-[10px] text-emerald-800 dark:text-emerald-400 font-bold">Total Debet (Panjar)</div>
+                <div className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-300">
+                  Rp {totalDebet.toLocaleString('id-ID')}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50">
+                <div className="text-[10px] text-rose-800 dark:text-rose-400 font-bold">Total Kredit (Biaya)</div>
+                <div className="font-mono text-sm font-black text-rose-700 dark:text-rose-300">
+                  Rp {totalKredit.toLocaleString('id-ID')}
+                </div>
+              </div>
+            </div>
+            <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 flex items-center justify-between">
+              <span className="font-bold text-xs text-sky-900 dark:text-sky-200">Saldo Akhir SKUM:</span>
+              <span className="font-mono font-black text-base text-sky-800 dark:text-sky-300">
+                Rp {saldoSkum.toLocaleString('id-ID')}
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Main Journal Data Table (Standar Lebar) */
+        <div className={`rounded-2xl border overflow-hidden shadow-sm ${
+          isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'
+        }`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className={`border-b font-extrabold uppercase text-[10px] tracking-wider ${
+                  isLight ? 'bg-slate-100 text-slate-700' : 'bg-slate-800 text-slate-300'
+                }`}>
+                  <th className="p-3 text-center w-10">No</th>
+                  <th className="p-3 w-28">Tanggal</th>
+                  <th className="p-3 w-44">Nomor Perkara</th>
+                  <th className="p-3">Uraian Transaksi SKUM</th>
+                  <th className="p-3 text-right w-32">Debet (Panjar)</th>
+                  <th className="p-3 text-right w-32">Kredit (Pengeluaran)</th>
+                  <th className="p-3 text-center w-36">Kategori & Status</th>
+                  <th className="p-3 text-center w-36">Pilih Warna Baris</th>
+                  <th className="p-3 text-center w-20">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-sans">
+                {filteredRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-12 text-center text-slate-400">
+                      <div className="max-w-xs mx-auto space-y-2">
+                        <BookOpen className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-700" />
+                        <p className="font-bold text-sm text-slate-600 dark:text-slate-300">Belum Ada Data Jurnal SKUM</p>
+                        <p className="text-xs text-slate-400">
+                          Pilih menu "Pencatatan Jurnal Otomatis" atau "+ Log SKUM Manual" untuk menambahkan rincian.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRecords.map((r, idx) => {
+                    const warna = getEffectiveWarnaBaris(r);
+                    let rowColorClass = '';
+                    if (warna === 'hijau') {
+                      rowColorClass = isLight 
+                        ? 'bg-emerald-50/80 hover:bg-emerald-100/90 border-l-4 border-l-emerald-600' 
+                        : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-l-4 border-l-emerald-500';
+                    } else if (warna === 'kuning') {
+                      rowColorClass = isLight 
+                        ? 'bg-amber-50/80 hover:bg-amber-100/90 border-l-4 border-l-amber-500' 
+                        : 'bg-amber-950/35 hover:bg-amber-900/45 border-l-4 border-l-amber-400';
+                    } else if (warna === 'merah') {
+                      rowColorClass = isLight 
+                        ? 'bg-rose-50/80 hover:bg-rose-100/90 border-l-4 border-l-rose-600' 
+                        : 'bg-rose-950/40 hover:bg-rose-900/50 border-l-4 border-l-rose-500';
+                    } else if (warna === 'oranye') {
+                      rowColorClass = isLight 
+                        ? 'bg-amber-50/80 hover:bg-amber-100/90 border-l-4 border-l-amber-600' 
+                        : 'bg-amber-950/40 hover:bg-amber-900/50 border-l-4 border-l-amber-500';
+                    } else {
+                      rowColorClass = isLight
+                        ? 'hover:bg-slate-50 border-l-4 border-l-transparent'
+                        : 'hover:bg-slate-800/50 border-l-4 border-l-transparent';
+                    }
+
+                    const cleanKet = stripWarnaTag(r.keterangan);
+
+                    return (
+                      <tr 
+                        key={`${r.id}-${idx}`} 
+                        className={`transition-colors ${rowColorClass}`}
+                      >
+                        <td className="p-3 text-center font-bold text-slate-400">{idx + 1}</td>
+                        <td className="p-3 font-mono font-medium text-slate-700 dark:text-slate-300">{r.tanggal || '-'}</td>
+                        <td className="p-3 font-mono font-extrabold text-sky-800 dark:text-sky-300">
+                          {r.nomorPerkara}
+                        </td>
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900 dark:text-slate-100 text-xs">{r.uraian}</div>
+                          {cleanKet && (
+                            <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">{cleanKet}</div>
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-mono font-black text-emerald-700 dark:text-emerald-300">
+                          {r.penerimaan > 0 ? `Rp ${r.penerimaan.toLocaleString('id-ID')}` : '-'}
+                        </td>
+                        <td className="p-3 text-right font-mono font-black text-rose-700 dark:text-rose-300">
+                          {r.pengeluaran > 0 ? `Rp ${r.pengeluaran.toLocaleString('id-ID')}` : '-'}
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                              r.kategori === 'Panjar' 
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800' 
+                                : r.kategori === 'ATK'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                                : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                            }`}>
+                              {r.kategori}
+                            </span>
+                            {warna === 'hijau' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-600 text-white flex items-center gap-0.5 shadow-xs">
+                                <Check className="w-2.5 h-2.5" /> Sudah Disetor
+                              </span>
+                            )}
+                            {warna === 'kuning' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-400 text-slate-950 flex items-center gap-0.5 shadow-xs border border-amber-500">
+                                🟡 Belum Setor Cash
+                              </span>
+                            )}
+                            {warna === 'merah' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-600 text-white flex items-center gap-0.5 shadow-xs">
+                                🔴 Pinjaman
+                              </span>
+                            )}
+                            {warna === 'oranye' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-600 text-white flex items-center gap-0.5 shadow-xs">
+                                🟠 Proses
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-3 text-center">
+                          {/* Interactive Row Color Palette */}
+                          <div className="inline-flex items-center p-1 rounded-xl border bg-white/80 dark:bg-slate-800/80 shadow-xs space-x-1">
+                            {/* Hijau / Sudah Disetor */}
+                            <button
+                              type="button"
+                              onClick={() => handleQuickSetColor(r, 'hijau')}
+                              className={`w-5 h-5 rounded-full bg-emerald-500 hover:bg-emerald-600 transition-all flex items-center justify-center ${
+                                warna === 'hijau' ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                              }`}
+                              title="Tandai baris Hijau (Sudah Disetor ke Bendahara)"
+                            >
+                              {warna === 'hijau' && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                            </button>
+
+                            {/* Kuning / Belum Setor Cash (Bisa Cetak Kuitansi) */}
+                            <button
+                              type="button"
+                              onClick={() => handleQuickSetColor(r, 'kuning')}
+                              className={`w-5 h-5 rounded-full bg-amber-400 hover:bg-amber-500 border border-amber-600 transition-all flex items-center justify-center ${
+                                warna === 'kuning' ? 'ring-2 ring-amber-600 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                              }`}
+                              title="Tandai baris Kuning (Belum Setor Uang Cash ke Bendahara - Kuitansi)"
+                            >
+                              {warna === 'kuning' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
+                            </button>
+
+                            {/* Merah / Pinjaman */}
+                            <button
+                              type="button"
+                              onClick={() => handleQuickSetColor(r, 'merah')}
+                              className={`w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600 transition-all flex items-center justify-center ${
+                                warna === 'merah' ? 'ring-2 ring-rose-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                              }`}
+                              title="Tandai baris Merah (Pinjaman Saldo SKUM)"
+                            >
+                              {warna === 'merah' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                            </button>
+
+                            {/* Oranye / Proses */}
+                            <button
+                              type="button"
+                              onClick={() => handleQuickSetColor(r, 'oranye')}
+                              className={`w-5 h-5 rounded-full bg-amber-500 hover:bg-amber-600 transition-all flex items-center justify-center ${
+                                warna === 'oranye' ? 'ring-2 ring-amber-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
+                              }`}
+                              title="Tandai baris Oranye (Dalam Proses)"
+                            >
+                              {warna === 'oranye' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                            </button>
+
+                            {/* Reset / Default */}
+                            <button
+                              type="button"
+                              onClick={() => handleQuickSetColor(r, 'default')}
+                              className={`w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600 transition-all flex items-center justify-center ${
+                                warna === 'default' ? 'ring-2 ring-slate-400 scale-110' : 'opacity-60 hover:opacity-100'
+                              }`}
+                              title="Reset warna baris ke standar"
+                            >
+                              <span className="text-[8px] font-bold text-slate-600 dark:text-slate-300">✕</span>
+                            </button>
+                          </div>
+                        </td>
+                        <td className="p-3 text-center space-x-1">
+                          {/* Quick receipt button for Yellow rows */}
+                          {warna === 'kuning' && onNavigateToKasKuning && (
+                            <button
+                              onClick={onNavigateToKasKuning}
+                              className="p-1.5 text-amber-700 dark:text-amber-300 hover:text-amber-900 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors inline-flex items-center"
+                              title="Buka menu kuitansi kas kuning untuk cetak tanda terima"
+                            >
+                              <Receipt className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleStartEdit(r)}
+                            className="p-1.5 text-slate-400 hover:text-sky-600 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/40 transition-colors"
+                            title="Edit data log SKUM ini"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => onDeleteRecord(r.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                            title="Hapus baris log ini"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+              <tfoot>
+                <tr className={`border-t font-black text-xs ${
+                  isLight ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-white'
+                }`}>
+                  <td colSpan={4} className="p-3 text-right uppercase tracking-wider">TOTAL KESELURUHAN SKUM:</td>
+                  <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                    Rp {totalDebet.toLocaleString('id-ID')}
+                  </td>
+                  <td className="p-3 text-right font-mono text-rose-600 dark:text-rose-400">
+                    Rp {totalKredit.toLocaleString('id-ID')}
+                  </td>
+                  <td colSpan={3} className="p-3 text-center font-mono text-sky-600 dark:text-sky-400">
+                    Saldo: Rp {saldoSkum.toLocaleString('id-ID')}
                   </td>
                 </tr>
-              ) : (
-                filteredRecords.map((r, idx) => {
-                  const warna = getEffectiveWarnaBaris(r);
-                  let rowColorClass = '';
-                  if (warna === 'hijau') {
-                    rowColorClass = isLight 
-                      ? 'bg-emerald-50/80 hover:bg-emerald-100/90 border-l-4 border-l-emerald-600' 
-                      : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-l-4 border-l-emerald-500';
-                  } else if (warna === 'kuning') {
-                    rowColorClass = isLight 
-                      ? 'bg-amber-50/80 hover:bg-amber-100/90 border-l-4 border-l-amber-500' 
-                      : 'bg-amber-950/35 hover:bg-amber-900/45 border-l-4 border-l-amber-400';
-                  } else if (warna === 'merah') {
-                    rowColorClass = isLight 
-                      ? 'bg-rose-50/80 hover:bg-rose-100/90 border-l-4 border-l-rose-600' 
-                      : 'bg-rose-950/40 hover:bg-rose-900/50 border-l-4 border-l-rose-500';
-                  } else if (warna === 'oranye') {
-                    rowColorClass = isLight 
-                      ? 'bg-amber-50/80 hover:bg-amber-100/90 border-l-4 border-l-amber-600' 
-                      : 'bg-amber-950/40 hover:bg-amber-900/50 border-l-4 border-l-amber-500';
-                  } else {
-                    rowColorClass = isLight
-                      ? 'hover:bg-slate-50 border-l-4 border-l-transparent'
-                      : 'hover:bg-slate-800/50 border-l-4 border-l-transparent';
-                  }
-
-                  const cleanKet = stripWarnaTag(r.keterangan);
-
-                  return (
-                    <tr 
-                      key={`${r.id}-${idx}`} 
-                      className={`transition-colors ${rowColorClass}`}
-                    >
-                      <td className="p-3 text-center font-bold text-slate-400">{idx + 1}</td>
-                      <td className="p-3 font-mono font-medium text-slate-700 dark:text-slate-300">{r.tanggal || '-'}</td>
-                      <td className="p-3 font-mono font-extrabold text-sky-800 dark:text-sky-300">
-                        {r.nomorPerkara}
-                      </td>
-                      <td className="p-3">
-                        <div className="font-bold text-slate-900 dark:text-slate-100 text-xs">{r.uraian}</div>
-                        {cleanKet && (
-                          <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">{cleanKet}</div>
-                        )}
-                      </td>
-                      <td className="p-3 text-right font-mono font-black text-emerald-700 dark:text-emerald-300">
-                        {r.penerimaan > 0 ? `Rp ${r.penerimaan.toLocaleString('id-ID')}` : '-'}
-                      </td>
-                      <td className="p-3 text-right font-mono font-black text-rose-700 dark:text-rose-300">
-                        {r.pengeluaran > 0 ? `Rp ${r.pengeluaran.toLocaleString('id-ID')}` : '-'}
-                      </td>
-                      <td className="p-3 text-center">
-                        <div className="flex flex-col items-center gap-1">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                            r.kategori === 'Panjar' 
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800' 
-                              : r.kategori === 'ATK'
-                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
-                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
-                          }`}>
-                            {r.kategori}
-                          </span>
-                          {warna === 'hijau' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-600 text-white flex items-center gap-0.5 shadow-xs">
-                              <Check className="w-2.5 h-2.5" /> Sudah Disetor
-                            </span>
-                          )}
-                          {warna === 'kuning' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-400 text-slate-950 flex items-center gap-0.5 shadow-xs border border-amber-500">
-                              🟡 Belum Setor Cash
-                            </span>
-                          )}
-                          {warna === 'merah' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-600 text-white flex items-center gap-0.5 shadow-xs">
-                              🔴 Pinjaman
-                            </span>
-                          )}
-                          {warna === 'oranye' && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-600 text-white flex items-center gap-0.5 shadow-xs">
-                              🟠 Proses
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3 text-center">
-                        {/* Interactive Row Color Palette */}
-                        <div className="inline-flex items-center p-1 rounded-xl border bg-white/80 dark:bg-slate-800/80 shadow-xs space-x-1">
-                          {/* Hijau / Sudah Disetor */}
-                          <button
-                            type="button"
-                            onClick={() => handleQuickSetColor(r, 'hijau')}
-                            className={`w-5 h-5 rounded-full bg-emerald-500 hover:bg-emerald-600 transition-all flex items-center justify-center ${
-                              warna === 'hijau' ? 'ring-2 ring-emerald-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
-                            }`}
-                            title="Tandai baris Hijau (Sudah Disetor ke Bendahara)"
-                          >
-                            {warna === 'hijau' && <Check className="w-3 h-3 text-white stroke-[3]" />}
-                          </button>
-
-                          {/* Kuning / Belum Setor Cash (Bisa Cetak Kuitansi) */}
-                          <button
-                            type="button"
-                            onClick={() => handleQuickSetColor(r, 'kuning')}
-                            className={`w-5 h-5 rounded-full bg-amber-400 hover:bg-amber-500 border border-amber-600 transition-all flex items-center justify-center ${
-                              warna === 'kuning' ? 'ring-2 ring-amber-600 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
-                            }`}
-                            title="Tandai baris Kuning (Belum Setor Uang Cash ke Bendahara - Kuitansi)"
-                          >
-                            {warna === 'kuning' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950"></span>}
-                          </button>
-
-                          {/* Merah / Pinjaman */}
-                          <button
-                            type="button"
-                            onClick={() => handleQuickSetColor(r, 'merah')}
-                            className={`w-5 h-5 rounded-full bg-rose-500 hover:bg-rose-600 transition-all flex items-center justify-center ${
-                              warna === 'merah' ? 'ring-2 ring-rose-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
-                            }`}
-                            title="Tandai baris Merah (Pinjaman Saldo SKUM)"
-                          >
-                            {warna === 'merah' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
-                          </button>
-
-                          {/* Oranye / Proses */}
-                          <button
-                            type="button"
-                            onClick={() => handleQuickSetColor(r, 'oranye')}
-                            className={`w-5 h-5 rounded-full bg-amber-500 hover:bg-amber-600 transition-all flex items-center justify-center ${
-                              warna === 'oranye' ? 'ring-2 ring-amber-700 ring-offset-1 scale-110 shadow-xs' : 'opacity-70 hover:opacity-100'
-                            }`}
-                            title="Tandai baris Oranye (Dalam Proses)"
-                          >
-                            {warna === 'oranye' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
-                          </button>
-
-                          {/* Reset / Default */}
-                          <button
-                            type="button"
-                            onClick={() => handleQuickSetColor(r, 'default')}
-                            className={`w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600 transition-all flex items-center justify-center ${
-                              warna === 'default' ? 'ring-2 ring-slate-400 scale-110' : 'opacity-60 hover:opacity-100'
-                            }`}
-                            title="Reset warna baris ke standar"
-                          >
-                            <span className="text-[8px] font-bold text-slate-600 dark:text-slate-300">✕</span>
-                          </button>
-                        </div>
-                      </td>
-                      <td className="p-3 text-center space-x-1">
-                        {/* Quick receipt button for Yellow rows */}
-                        {warna === 'kuning' && onNavigateToKasKuning && (
-                          <button
-                            onClick={onNavigateToKasKuning}
-                            className="p-1.5 text-amber-700 dark:text-amber-300 hover:text-amber-900 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors inline-flex items-center"
-                            title="Buka menu kuitansi kas kuning untuk cetak tanda terima"
-                          >
-                            <Receipt className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleStartEdit(r)}
-                          className="p-1.5 text-slate-400 hover:text-sky-600 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/40 transition-colors"
-                          title="Edit data log SKUM ini"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => onDeleteRecord(r.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                          title="Hapus baris log ini"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-            <tfoot>
-              <tr className={`border-t font-black text-xs ${
-                isLight ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-white'
-              }`}>
-                <td colSpan={4} className="p-3 text-right uppercase tracking-wider">TOTAL KESELURUHAN SKUM:</td>
-                <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
-                  Rp {totalDebet.toLocaleString('id-ID')}
-                </td>
-                <td className="p-3 text-right font-mono text-rose-600 dark:text-rose-400">
-                  Rp {totalKredit.toLocaleString('id-ID')}
-                </td>
-                <td colSpan={3} className="p-3 text-center font-mono text-sky-600 dark:text-sky-400">
-                  Saldo: Rp {saldoSkum.toLocaleString('id-ID')}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+              </tfoot>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modal Add SKUM Manual */}
       {isAddModalOpen && (

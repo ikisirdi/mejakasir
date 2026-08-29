@@ -21,7 +21,12 @@ import {
   Clock, 
   Sparkles,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Smartphone,
+  Table,
+  User,
+  Calendar,
+  Layers
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
 
@@ -51,6 +56,14 @@ export const CaseTable: React.FC<CaseTableProps> = ({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 8;
+
+  // View Mode: otomatis 'mobile' pada layar HP (< 768px), atau switchable 'table'
+  const [viewMode, setViewMode] = useState<'mobile' | 'table'>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768 ? 'mobile' : 'table';
+    }
+    return 'table';
+  });
 
   // Search & Filter Logic
   const filteredCases = useMemo(() => {
@@ -216,7 +229,7 @@ export const CaseTable: React.FC<CaseTableProps> = ({
         </div>
       </div>
 
-      {/* SEARCH INPUT & CATEGORY FILTER TABS */}
+      {/* VIEW MODE TOGGLE & QUICK CATEGORY FILTER */}
       <div className={`flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl border transition-colors ${
         isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/60 border-slate-700/60'
       }`}>
@@ -238,254 +251,449 @@ export const CaseTable: React.FC<CaseTableProps> = ({
           />
         </div>
 
-        {/* Quick Kategori Filter Pills */}
-        <div className="flex items-center space-x-1 text-xs w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setFilters(prev => ({ ...prev, kategoriPerkara: 'ALL' }))}
-            className={`px-3 py-1 rounded-lg transition-colors font-semibold ${
-              filters.kategoriPerkara === 'ALL'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : isLight 
-                  ? 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100' 
-                  : 'text-slate-400 bg-slate-900 border border-slate-700 hover:text-white'
-            }`}
-          >
-            Semua ({cases.length})
-          </button>
-          <button
-            onClick={() => setFilters(prev => ({ ...prev, kategoriPerkara: 'Gugatan' }))}
-            className={`px-3 py-1 rounded-lg transition-colors font-semibold ${
-              filters.kategoriPerkara === 'Gugatan'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : isLight 
-                  ? 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100' 
-                  : 'text-slate-400 bg-slate-900 border border-slate-700 hover:text-white'
-            }`}
-          >
-            Gugatan (Pdt.G)
-          </button>
-          <button
-            onClick={() => setFilters(prev => ({ ...prev, kategoriPerkara: 'Permohonan' }))}
-            className={`px-3 py-1 rounded-lg transition-colors font-semibold ${
-              filters.kategoriPerkara === 'Permohonan'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : isLight 
-                  ? 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100' 
-                  : 'text-slate-400 bg-slate-900 border border-slate-700 hover:text-white'
-            }`}
-          >
-            Permohonan (Pdt.P)
-          </button>
+        {/* View Mode Switcher + Kategori Filters */}
+        <div className="flex flex-wrap items-center justify-between w-full sm:w-auto gap-2">
+          {/* View Mode Pill Toggle */}
+          <div className="flex items-center space-x-1 p-1 rounded-xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('mobile')}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                viewMode === 'mobile'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Tampilan Khusus Mobile / HP (Bebas Geser, Mudah Dibaca)"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>📱 Kartu HP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`flex items-center space-x-1 px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                viewMode === 'table'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Tampilan Tabel Standar Lebar"
+            >
+              <Table className="w-3.5 h-3.5" />
+              <span>🖥️ Tabel</span>
+            </button>
+          </div>
+
+          {/* Quick Kategori Filter Pills */}
+          <div className="flex items-center space-x-1 text-xs overflow-x-auto pb-1 sm:pb-0">
+            <button
+              onClick={() => setFilters(prev => ({ ...prev, kategoriPerkara: 'ALL' }))}
+              className={`px-3 py-1 rounded-lg transition-colors font-semibold ${
+                filters.kategoriPerkara === 'ALL'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isLight 
+                    ? 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100' 
+                    : 'text-slate-400 bg-slate-900 border border-slate-700 hover:text-white'
+              }`}
+            >
+              Semua ({cases.length})
+            </button>
+            <button
+              onClick={() => setFilters(prev => ({ ...prev, kategoriPerkara: 'Gugatan' }))}
+              className={`px-3 py-1 rounded-lg transition-colors font-semibold ${
+                filters.kategoriPerkara === 'Gugatan'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isLight 
+                    ? 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100' 
+                    : 'text-slate-400 bg-slate-900 border border-slate-700 hover:text-white'
+              }`}
+            >
+              Pdt.G
+            </button>
+            <button
+              onClick={() => setFilters(prev => ({ ...prev, kategoriPerkara: 'Permohonan' }))}
+              className={`px-3 py-1 rounded-lg transition-colors font-semibold ${
+                filters.kategoriPerkara === 'Permohonan'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : isLight 
+                    ? 'text-slate-600 bg-white border border-slate-200 hover:bg-slate-100' 
+                    : 'text-slate-400 bg-slate-900 border border-slate-700 hover:text-white'
+              }`}
+            >
+              Pdt.P
+            </button>
+          </div>
         </div>
 
       </div>
 
-      {/* DATA TABLE */}
-      <div className={`overflow-x-auto border rounded-2xl transition-colors ${
-        isLight ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-900'
-      }`}>
-        <table className="w-full text-left text-xs">
-          <thead className={`border-b font-bold uppercase tracking-wider ${
-            isLight ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-800 text-slate-200 border-slate-700'
-          }`}>
-            <tr>
-              
-              {/* Nomor Perkara */}
-              <th 
-                onClick={() => handleSort('nomorPerkara')}
-                className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+      {/* TAMPILAN KHUSUS MOBILE (HP) */}
+      {viewMode === 'mobile' ? (
+        <div className="space-y-3">
+          {paginatedCases.length === 0 ? (
+            <div className={`p-8 rounded-2xl border text-center ${
+              isLight ? 'bg-white border-slate-200 text-slate-500' : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}>
+              <p className="text-sm font-bold">Tidak ada data perkara yang sesuai dengan filter.</p>
+              <button
+                onClick={() => setFilters({ searchQuery: '', jenisPerkara: 'ALL', kategoriPerkara: 'ALL', status: 'ALL', tahun: 'ALL' })}
+                className="mt-2 text-xs text-emerald-600 hover:underline font-bold"
               >
-                <div className="flex items-center space-x-1">
-                  <span>Nomor Perkara</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                </div>
-              </th>
-
-              {/* Nama Pihak */}
-              <th 
-                onClick={() => handleSort('namaPihak')}
-                className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                Reset semua filter
+              </button>
+            </div>
+          ) : (
+            paginatedCases.map((item, idx) => (
+              <div 
+                key={`mobile-case-${item.id}-${idx}`}
+                className={`p-4 rounded-2xl border transition-all shadow-xs ${
+                  isLight 
+                    ? 'bg-white border-slate-200 hover:border-emerald-300' 
+                    : 'bg-slate-900 border-slate-800 hover:border-emerald-700'
+                }`}
               >
-                <div className="flex items-center space-x-1">
-                  <span>Nama Pihak</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                </div>
-              </th>
-
-              {/* Jenis Perkara */}
-              <th 
-                onClick={() => handleSort('jenisPerkara')}
-                className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
-              >
-                <div className="flex items-center space-x-1">
-                  <span>Jenis Perkara</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                </div>
-              </th>
-
-              {/* Saldo Perkara (Rp) */}
-              <th 
-                onClick={() => handleSort('saldoPerkara')}
-                className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
-              >
-                <div className="flex items-center space-x-1">
-                  <span>Saldo Perkara (Rp)</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                </div>
-              </th>
-
-              {/* Tanggal Register */}
-              <th 
-                onClick={() => handleSort('tanggalRegister')}
-                className={`px-4 py-3 cursor-pointer transition-colors hidden md:table-cell ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
-              >
-                <div className="flex items-center space-x-1">
-                  <span>Tgl Register</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                </div>
-              </th>
-
-              {/* Status Perkara */}
-              <th 
-                onClick={() => handleSort('status')}
-                className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
-              >
-                <div className="flex items-center space-x-1">
-                  <span>Status</span>
-                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                </div>
-              </th>
-
-              {/* Aksi */}
-              <th className="px-4 py-3 text-right">Aksi</th>
-
-            </tr>
-          </thead>
-
-          <tbody className={`divide-y ${isLight ? 'divide-slate-200 bg-white' : 'divide-slate-800 bg-slate-900/50'}`}>
-            {paginatedCases.length === 0 ? (
-              <tr>
-                <td colSpan={7} className={`text-center py-12 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                  <p className="text-sm">Tidak ada data perkara yang sesuai dengan filter.</p>
-                  <button
-                    onClick={() => setFilters({ searchQuery: '', jenisPerkara: 'ALL', kategoriPerkara: 'ALL', status: 'ALL', tahun: 'ALL' })}
-                    className="mt-2 text-xs text-emerald-600 hover:underline font-semibold"
-                  >
-                    Reset semua filter
-                  </button>
-                </td>
-              </tr>
-            ) : (
-              paginatedCases.map((item, idx) => (
-                <tr key={`${item.id}-${idx}`} className={`transition-colors group ${isLight ? 'hover:bg-emerald-50/30' : 'hover:bg-slate-800/60'}`}>
-                  
-                  {/* Nomor Perkara */}
-                  <td className="px-4 py-3 font-mono font-extrabold text-emerald-700 whitespace-nowrap">
-                    {item.nomorPerkara}
-                  </td>
-
-                  {/* Nama Pihak */}
-                  <td className={`px-4 py-3 font-semibold max-w-xs truncate ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
-                    {item.namaPihak}
-                  </td>
-
-                  {/* Jenis Perkara */}
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`px-2 py-0.5 rounded text-[11px] font-medium border ${
+                {/* Header Card: Nomor Perkara & Badges */}
+                <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100 dark:border-slate-800/80">
+                  <div className="space-y-0.5">
+                    <span className="font-mono text-sm sm:text-base font-black text-emerald-700 dark:text-emerald-400 block">
+                      {item.nomorPerkara}
+                    </span>
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
                       isLight 
                         ? 'bg-slate-100 text-slate-700 border-slate-200' 
                         : 'bg-slate-800 text-slate-300 border-slate-700'
                     }`}>
-                      {item.jenisPerkara}
+                      {item.kategoriPerkara || item.jenisPerkara}
                     </span>
-                  </td>
+                  </div>
 
-                  {/* Saldo Perkara (Rp) */}
-                  <td className="px-4 py-3 font-bold whitespace-nowrap">
-                    <div className="flex items-center space-x-1.5">
-                      <span className={item.saldoPerkara === 0 ? 'text-rose-600 font-extrabold' : isLight ? 'text-slate-900' : 'text-slate-100'}>
-                        {formatRupiah(item.saldoPerkara)}
-                      </span>
-                      {item.saldoPerkara === 0 && (
-                        <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[9px] px-1.5 py-0.5 rounded font-bold" title="Saldo Panjar Habis">
-                          Rp0
-                        </span>
-                      )}
+                  {/* Status Badge */}
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold border shrink-0 ${
+                    item.status === 'Putus' || item.status === 'Selesai'
+                      ? isLight ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                      : item.status === 'Minutasi'
+                      ? isLight ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-blue-950 text-blue-300 border-blue-800'
+                      : item.status === 'Diperiksa'
+                      ? isLight ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-amber-950 text-amber-300 border-amber-800'
+                      : isLight ? 'bg-slate-100 text-slate-700 border-slate-300' : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}>
+                    {item.status}
+                  </span>
+                </div>
+
+                {/* Nama Pihak & Detail Info */}
+                <div className="py-2.5 space-y-2">
+                  <div className="flex items-start space-x-2">
+                    <User className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nama Pihak</div>
+                      <div className={`font-bold text-sm leading-snug ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                        {item.namaPihak}
+                      </div>
                     </div>
-                  </td>
+                  </div>
 
-                  {/* Tanggal Register */}
-                  <td className={`px-4 py-3 whitespace-nowrap hidden md:table-cell ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {item.tanggalRegister}
-                  </td>
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 text-slate-500 dark:text-slate-400">
+                    <div className="flex items-center space-x-1.5">
+                      <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{item.jenisPerkara}</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>{item.tanggalRegister || '-'}</span>
+                    </div>
+                  </div>
+                </div>
 
-                  {/* Status */}
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                      item.status === 'Putus' || item.status === 'Selesai'
-                        ? isLight ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-emerald-950 text-emerald-400 border-emerald-800'
-                        : item.status === 'Minutasi'
-                        ? isLight ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-blue-950 text-blue-400 border-blue-800'
-                        : item.status === 'Diperiksa'
-                        ? isLight ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-amber-950 text-amber-400 border-amber-800'
-                        : isLight ? 'bg-slate-100 text-slate-700 border-slate-300' : 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}>
-                      {item.status}
-                    </span>
-                  </td>
-
-                  {/* Actions */}
-                  <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
-                    {onOpenJurnal && (
-                      <button
-                        onClick={() => onOpenJurnal(item)}
-                        className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 font-bold text-[10px] border border-amber-500/30 transition-colors"
-                        title="Catat Jurnal SKUM Perkara Ini"
-                      >
-                        🧮 Jurnal
-                      </button>
+                {/* Saldo Panjar Highlight Box */}
+                <div className={`p-3 rounded-xl mb-3 flex items-center justify-between border ${
+                  item.saldoPerkara === 0 
+                    ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/60' 
+                    : isLight 
+                    ? 'bg-emerald-50/70 border-emerald-200/80' 
+                    : 'bg-emerald-950/20 border-emerald-900/50'
+                }`}>
+                  <div>
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Sisa Saldo Panjar
+                    </div>
+                    {item.saldoPerkara === 0 && (
+                      <span className="text-[9px] font-bold text-rose-600 dark:text-rose-400">
+                        ⚠️ Saldo Panjar Habis
+                      </span>
                     )}
+                  </div>
+                  <div className={`font-mono text-base font-black ${
+                    item.saldoPerkara === 0 
+                      ? 'text-rose-600 dark:text-rose-400' 
+                      : isLight ? 'text-emerald-800' : 'text-emerald-300'
+                  }`}>
+                    {formatRupiah(item.saldoPerkara)}
+                  </div>
+                </div>
+
+                {/* Touch-Friendly Action Buttons */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  {onOpenJurnal && (
                     <button
-                      onClick={() => onSelectCase(item)}
-                      className={`p-1.5 rounded border transition-colors ${
-                        isLight 
-                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' 
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
-                      }`}
-                      title="Lihat Detail Kartu Perkara"
+                      type="button"
+                      onClick={() => onOpenJurnal(item)}
+                      className="flex-1 min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs flex items-center justify-center space-x-1.5 shadow-xs active:scale-95 transition-all"
                     >
-                      <Eye className="w-3.5 h-3.5" />
+                      <span>🧮 Jurnal SKUM</span>
                     </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onSelectCase(item)}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
+                      isLight 
+                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' 
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                    }`}
+                    title="Lihat Detail Kartu Perkara"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Rincian</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenForm(item)}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
+                      isLight 
+                        ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' 
+                        : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
+                    }`}
+                    title="Edit Data Perkara"
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm(`Apakah Anda yakin ingin menghapus perkara ${item.nomorPerkara}?`)) {
+                        onDeleteCase(item.id);
+                      }
+                    }}
+                    className="min-h-[38px] px-2.5 py-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-600 hover:text-white rounded-xl border border-rose-200 dark:border-rose-800 transition-all flex items-center justify-center"
+                    title="Hapus Perkara"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        /* DATA TABLE (STANDAR LEBAR) */
+        <div className={`overflow-x-auto border rounded-2xl transition-colors ${
+          isLight ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-900'
+        }`}>
+          <table className="w-full text-left text-xs">
+            <thead className={`border-b font-bold uppercase tracking-wider ${
+              isLight ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-slate-800 text-slate-200 border-slate-700'
+            }`}>
+              <tr>
+                
+                {/* Nomor Perkara */}
+                <th 
+                  onClick={() => handleSort('nomorPerkara')}
+                  className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Nomor Perkara</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </th>
+
+                {/* Nama Pihak */}
+                <th 
+                  onClick={() => handleSort('namaPihak')}
+                  className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Nama Pihak</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </th>
+
+                {/* Jenis Perkara */}
+                <th 
+                  onClick={() => handleSort('jenisPerkara')}
+                  className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Jenis Perkara</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </th>
+
+                {/* Saldo Perkara (Rp) */}
+                <th 
+                  onClick={() => handleSort('saldoPerkara')}
+                  className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Saldo Perkara (Rp)</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </th>
+
+                {/* Tanggal Register */}
+                <th 
+                  onClick={() => handleSort('tanggalRegister')}
+                  className={`px-4 py-3 cursor-pointer transition-colors hidden md:table-cell ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Tgl Register</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </th>
+
+                {/* Status Perkara */}
+                <th 
+                  onClick={() => handleSort('status')}
+                  className={`px-4 py-3 cursor-pointer transition-colors ${isLight ? 'hover:bg-slate-200/60' : 'hover:bg-slate-700/50'}`}
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Status</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  </div>
+                </th>
+
+                {/* Aksi */}
+                <th className="px-4 py-3 text-right">Aksi</th>
+
+              </tr>
+            </thead>
+
+            <tbody className={`divide-y ${isLight ? 'divide-slate-200 bg-white' : 'divide-slate-800 bg-slate-900/50'}`}>
+              {paginatedCases.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className={`text-center py-12 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <p className="text-sm">Tidak ada data perkara yang sesuai dengan filter.</p>
                     <button
-                      onClick={() => onOpenForm(item)}
-                      className={`p-1.5 rounded border transition-colors ${
-                        isLight 
-                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' 
-                          : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
-                      }`}
-                      title="Edit Data Perkara"
+                      onClick={() => setFilters({ searchQuery: '', jenisPerkara: 'ALL', kategoriPerkara: 'ALL', status: 'ALL', tahun: 'ALL' })}
+                      className="mt-2 text-xs text-emerald-600 hover:underline font-semibold"
                     >
-                      <Edit className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Apakah Anda yakin ingin menghapus perkara ${item.nomorPerkara}?`)) {
-                          onDeleteCase(item.id);
-                        }
-                      }}
-                      className="p-1.5 bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 rounded border border-slate-700 transition-colors"
-                      title="Hapus Perkara"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      Reset semua filter
                     </button>
                   </td>
-
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                paginatedCases.map((item, idx) => (
+                  <tr key={`${item.id}-${idx}`} className={`transition-colors group ${isLight ? 'hover:bg-emerald-50/30' : 'hover:bg-slate-800/60'}`}>
+                    
+                    {/* Nomor Perkara */}
+                    <td className="px-4 py-3 font-mono font-extrabold text-emerald-700 whitespace-nowrap">
+                      {item.nomorPerkara}
+                    </td>
+
+                    {/* Nama Pihak */}
+                    <td className={`px-4 py-3 font-semibold max-w-xs truncate ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                      {item.namaPihak}
+                    </td>
+
+                    {/* Jenis Perkara */}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-medium border ${
+                        isLight 
+                          ? 'bg-slate-100 text-slate-700 border-slate-200' 
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}>
+                        {item.jenisPerkara}
+                      </span>
+                    </td>
+
+                    {/* Saldo Perkara (Rp) */}
+                    <td className="px-4 py-3 font-bold whitespace-nowrap">
+                      <div className="flex items-center space-x-1.5">
+                        <span className={item.saldoPerkara === 0 ? 'text-rose-600 font-extrabold' : isLight ? 'text-slate-900' : 'text-slate-100'}>
+                          {formatRupiah(item.saldoPerkara)}
+                        </span>
+                        {item.saldoPerkara === 0 && (
+                          <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[9px] px-1.5 py-0.5 rounded font-bold" title="Saldo Panjar Habis">
+                            Rp0
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Tanggal Register */}
+                    <td className={`px-4 py-3 whitespace-nowrap hidden md:table-cell ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {item.tanggalRegister}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                        item.status === 'Putus' || item.status === 'Selesai'
+                          ? isLight ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                          : item.status === 'Minutasi'
+                          ? isLight ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-blue-950 text-blue-400 border-blue-800'
+                          : item.status === 'Diperiksa'
+                          ? isLight ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-amber-950 text-amber-400 border-amber-800'
+                          : isLight ? 'bg-slate-100 text-slate-700 border-slate-300' : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}>
+                        {item.status}
+                      </span>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-4 py-3 text-right whitespace-nowrap space-x-1">
+                      {onOpenJurnal && (
+                        <button
+                          onClick={() => onOpenJurnal(item)}
+                          className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-700 dark:text-amber-300 font-bold text-[10px] border border-amber-500/30 transition-colors"
+                          title="Catat Jurnal SKUM Perkara Ini"
+                        >
+                          🧮 Jurnal
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onSelectCase(item)}
+                        className={`p-1.5 rounded border transition-colors ${
+                          isLight 
+                            ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' 
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+                        }`}
+                        title="Lihat Detail Kartu Perkara"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => onOpenForm(item)}
+                        className={`p-1.5 rounded border transition-colors ${
+                          isLight 
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200' 
+                            : 'bg-slate-800 hover:bg-slate-700 text-emerald-400 border-slate-700'
+                        }`}
+                        title="Edit Data Perkara"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Apakah Anda yakin ingin menghapus perkara ${item.nomorPerkara}?`)) {
+                            onDeleteCase(item.id);
+                          }
+                        }}
+                        className="p-1.5 bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 rounded border border-slate-700 transition-colors"
+                        title="Hapus Perkara"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* PAGINATION FOOTER */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs text-slate-400">
