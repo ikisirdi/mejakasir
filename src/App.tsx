@@ -363,6 +363,10 @@ export default function App() {
           }
         }
 
+        if (liveData.kasOpname) {
+          StorageService.saveKasOpname(liveData.kasOpname);
+        }
+
         setCacheMeta(StorageService.getCacheMeta());
         StorageService.saveSyncSettings({
           ...currentSyncSettings,

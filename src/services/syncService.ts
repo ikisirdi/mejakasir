@@ -1,4 +1,4 @@
-import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, JenisPerkara, KategoriPerkara, StatusPerkara } from '../types';
+import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData, JenisPerkara, KategoriPerkara, StatusPerkara } from '../types';
 
 export const DEFAULT_SPREADSHEET_ID = '11YqzoHesVzx3jn_Fw_x76cs7xqpwzqazd6YP4RO5nBw';
 
@@ -484,6 +484,7 @@ export class SyncService {
     jurnalSkum: JurnalBiayaSkumRecord[];
     biayaProses: BiayaProsesRecord[];
     pinjamanSkum?: PinjamanSkumRecord[];
+    kasOpname?: KasOpnameData;
   } | null> {
     const targetUrl = url.trim();
     if (!targetUrl || !targetUrl.includes('script.google.com')) return null;
@@ -499,6 +500,7 @@ export class SyncService {
       let rawJurnal: any[] = [];
       let rawBiaya: any[] = [];
       let rawPinjaman: any[] = [];
+      let rawKasOpname: any = null;
 
       if (Array.isArray(json)) {
         rawCases = json;
@@ -517,9 +519,15 @@ export class SyncService {
         if (Array.isArray(json.pinjamanSaldo)) rawPinjaman = json.pinjamanSaldo;
         else if (Array.isArray(json.pinjamanSkum)) rawPinjaman = json.pinjamanSkum;
         else if (Array.isArray(json.pinjaman)) rawPinjaman = json.pinjaman;
+
+        if (json.kasOpname && typeof json.kasOpname === 'object') {
+          rawKasOpname = json.kasOpname;
+        } else if (json.kasir && typeof json.kasir === 'object') {
+          rawKasOpname = json.kasir;
+        }
       }
 
-      if (rawCases.length > 0 || rawJurnal.length > 0 || rawBiaya.length > 0 || rawPinjaman.length > 0) {
+      if (rawCases.length > 0 || rawJurnal.length > 0 || rawBiaya.length > 0 || rawPinjaman.length > 0 || rawKasOpname) {
         const mappedCases: CaseRecord[] = rawCases.map((c, idx) => {
           let panjar = Number(c.panjarAwal || c.panjar_awal || c.panjar || c.penerimaan || 0);
           let saldo = Number(c.saldoPerkara || c.saldo_perkara || c.saldo || 0);
@@ -661,11 +669,36 @@ export class SyncService {
           mappedPinjaman = SyncService.reconstructPinjamanFromJurnal(mappedJurnal);
         }
 
+        let mappedKasOpname: KasOpnameData | undefined = undefined;
+        if (rawKasOpname) {
+          let denomParsed: { [key: number]: number } | undefined = undefined;
+          if (rawKasOpname.denominations && typeof rawKasOpname.denominations === 'object') {
+            denomParsed = rawKasOpname.denominations;
+          } else if (rawKasOpname.denominasiJson) {
+            try { denomParsed = JSON.parse(rawKasOpname.denominasiJson); } catch (e) {}
+          }
+
+          mappedKasOpname = {
+            id: String(rawKasOpname.id || 'kas-opname-cloud'),
+            tanggal: String(rawKasOpname.tanggal || new Date().toISOString().split('T')[0]),
+            saldoFisikKasir: Number(rawKasOpname.saldoFisikKasir || rawKasOpname.saldoFisik || 0),
+            saldoStandarBuku: Number(rawKasOpname.saldoStandarBuku || rawKasOpname.saldoBuku || 0),
+            selisih: Number(rawKasOpname.selisih || 0),
+            statusSelisih: String(rawKasOpname.statusSelisih || rawKasOpname.status || 'PAS') as any,
+            modeKasBelumSetor: String(rawKasOpname.modeKasBelumSetor || 'auto') as any,
+            customKasBelumSetor: Number(rawKasOpname.customKasBelumSetor || 0),
+            denominations: denomParsed,
+            catatan: String(rawKasOpname.catatan || ''),
+            updatedAt: String(rawKasOpname.updatedAt || new Date().toISOString())
+          };
+        }
+
         return {
           cases: mappedCases,
           jurnalSkum: mappedJurnal,
           biayaProses: rawBiaya,
-          pinjamanSkum: mappedPinjaman
+          pinjamanSkum: mappedPinjaman,
+          kasOpname: mappedKasOpname
         };
       }
     } catch (err) {
@@ -686,6 +719,7 @@ export class SyncService {
     jurnalSkum: JurnalBiayaSkumRecord[];
     biayaProses: BiayaProsesRecord[];
     pinjamanSkum: PinjamanSkumRecord[];
+    kasOpname?: KasOpnameData;
     source: 'appsscript' | 'direct_sheet';
   } | null> {
     const timestamp = Date.now();
@@ -695,34 +729,38 @@ export class SyncService {
     try {
       const gvizBase = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&_t=${timestamp}`;
 
-      const [resCases, resJurnal, resBiaya, resPinjam] = await Promise.allSettled([
+      const [resCases, resJurnal, resBiaya, resPinjam, resKasOpname] = await Promise.allSettled([
         fetch(`${gvizBase}&sheet=DataPerkara`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
         fetch(`${gvizBase}&sheet=JurnalBiayaSKUM`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
         fetch(`${gvizBase}&sheet=BukuBiayaProses`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
-        fetch(`${gvizBase}&sheet=PinjamanSaldo`, { cache: 'no-store' }).then(r => r.ok ? r.text() : '')
+        fetch(`${gvizBase}&sheet=PinjamanSaldo`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
+        fetch(`${gvizBase}&sheet=KasOpnameKasir`, { cache: 'no-store' }).then(r => r.ok ? r.text() : '')
       ]);
 
       const casesCsv = resCases.status === 'fulfilled' ? resCases.value : '';
       const jurnalCsv = resJurnal.status === 'fulfilled' ? resJurnal.value : '';
       const biayaCsv = resBiaya.status === 'fulfilled' ? resBiaya.value : '';
       const pinjamCsv = resPinjam.status === 'fulfilled' ? resPinjam.value : '';
+      const kasOpnameCsv = resKasOpname.status === 'fulfilled' ? resKasOpname.value : '';
 
       const cases = casesCsv ? this.parseCsv(casesCsv) : [];
       const jurnalSkum = jurnalCsv ? this.parseJurnalBiayaSkumCsv(jurnalCsv) : [];
       const biayaProses = biayaCsv ? this.parseBiayaProsesCsv(biayaCsv) : [];
       let pinjamanSkum = pinjamCsv ? this.parsePinjamanSaldoCsv(pinjamCsv) : [];
+      let kasOpname = kasOpnameCsv ? this.parseKasOpnameCsv(kasOpnameCsv) : undefined;
 
       // If PinjamanSaldo sheet was empty, reconstruct loans from Jurnal SKUM
       if (pinjamanSkum.length === 0 && jurnalSkum.length > 0) {
         pinjamanSkum = this.reconstructPinjamanFromJurnal(jurnalSkum);
       }
 
-      if (cases.length > 0 || jurnalSkum.length > 0 || biayaProses.length > 0) {
+      if (cases.length > 0 || jurnalSkum.length > 0 || biayaProses.length > 0 || kasOpname) {
         return {
           cases,
           jurnalSkum,
           biayaProses,
           pinjamanSkum,
+          kasOpname,
           source: 'direct_sheet'
         };
       }
@@ -743,12 +781,87 @@ export class SyncService {
           jurnalSkum: appsScriptData.jurnalSkum,
           biayaProses: appsScriptData.biayaProses,
           pinjamanSkum: pinjam,
+          kasOpname: appsScriptData.kasOpname,
           source: 'appsscript'
         };
       }
     }
 
     return null;
+  }
+
+  /**
+   * Parse CSV content for KasOpnameKasir tab
+   */
+  static parseKasOpnameCsv(csvText: string): KasOpnameData | undefined {
+    const lines = csvText.split(/\r?\n/).filter(line => line.trim().length > 0);
+    if (lines.length < 2) return undefined;
+
+    const parseCsvLine = (line: string): string[] => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim().replace(/^"|"$/g, ''));
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim().replace(/^"|"$/g, ''));
+      return result;
+    };
+
+    const cleanMoney = (val?: string): number => {
+      if (!val) return 0;
+      const cleaned = val.replace(/[^0-9,-]/g, '').replace(',', '.');
+      const num = parseFloat(cleaned);
+      return isNaN(num) ? 0 : num;
+    };
+
+    // Grab the latest row (last row)
+    const latestRow = parseCsvLine(lines[lines.length - 1]);
+    if (latestRow.length < 3) return undefined;
+
+    let denomObj: { [key: number]: number } | undefined = undefined;
+    if (latestRow[8] && latestRow[8].startsWith('{')) {
+      try {
+        denomObj = JSON.parse(latestRow[8]);
+      } catch (e) {}
+    }
+
+    const rawStatus = (latestRow[5] || 'PAS').toUpperCase();
+    const validStatus = rawStatus.includes('SURPLUS') ? 'SURPLUS' : rawStatus.includes('DEFISIT') ? 'DEFISIT' : 'PAS';
+
+    return {
+      id: latestRow[0] || 'kas-opname-1',
+      tanggal: latestRow[1] || new Date().toISOString().split('T')[0],
+      saldoFisikKasir: cleanMoney(latestRow[2]),
+      saldoStandarBuku: cleanMoney(latestRow[3]),
+      selisih: cleanMoney(latestRow[4]),
+      statusSelisih: validStatus,
+      modeKasBelumSetor: latestRow[6] === 'custom' ? 'custom' : 'auto',
+      customKasBelumSetor: cleanMoney(latestRow[7]),
+      denominations: denomObj,
+      catatan: latestRow[9] || '',
+      updatedAt: latestRow[10] || new Date().toISOString()
+    };
+  }
+
+  /**
+   * Save Kas Opname Kasir state to Google Spreadsheet via Webhook
+   */
+  static async saveKasOpnameToCloud(webhookUrl: string, data: KasOpnameData): Promise<boolean> {
+    if (!webhookUrl || !webhookUrl.startsWith('http')) return false;
+    const payload = {
+      ...data,
+      denominasiJson: data.denominations ? JSON.stringify(data.denominations) : ''
+    };
+    return this.postToWebhook(webhookUrl, 'update_kas_opname', payload);
   }
 
   /**

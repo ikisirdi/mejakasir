@@ -116,5 +116,19 @@ export interface PinjamanSkumRecord {
   skumPengembalianId?: string; // ID of pengembalian in Jurnal SKUM
 }
 
+export interface KasOpnameData {
+  id?: string;
+  tanggal: string;              // YYYY-MM-DD
+  saldoFisikKasir: number;       // Uang fisik aktual di kasir (Rp)
+  saldoStandarBuku: number;      // Saldo menurut pembukuan standar (Rp)
+  selisih: number;               // saldoFisikKasir - saldoStandarBuku
+  statusSelisih: 'PAS' | 'SURPLUS' | 'DEFISIT';
+  modeKasBelumSetor: 'auto' | 'custom';
+  customKasBelumSetor: number;
+  denominations?: { [key: number]: number }; // breakdown pecahan lembar/keping
+  catatan?: string;
+  updatedAt: string;            // ISO timestamp
+}
+
 export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table' | 'kas-kuning';
 

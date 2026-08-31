@@ -118,6 +118,17 @@ function setupSheets() {
     ]);
     sheetPinjam.getRange('A1:H1').setFontWeight('bold').setBackground('#fed7aa');
   }
+
+  // 5. Sheet KasOpnameKasir (Diagnostik & Investigasi Kas Opname Kasir)
+  var sheetKasOpname = ss.getSheetByName('KasOpnameKasir') || ss.getSheetByName('KasOpname');
+  if (!sheetKasOpname) {
+    sheetKasOpname = ss.insertSheet('KasOpnameKasir');
+    sheetKasOpname.appendRow([
+      'ID', 'Tanggal', 'Saldo Fisik Kasir (Rp)', 'Saldo Standar Buku (Rp)', 'Selisih (Rp)',
+      'Status Selisih', 'Mode Kas Belum Setor', 'Custom Kas Belum Setor (Rp)', 'Pecahan Denominasi JSON', 'Catatan', 'Updated At'
+    ]);
+    sheetKasOpname.getRange('A1:K1').setFontWeight('bold').setBackground('#c7d2fe');
+  }
 }
 
 function doGet(e) {
@@ -268,6 +279,39 @@ function doGet(e) {
     }
   }
 
+  // Fetch KasOpnameKasir (Diagnostik Saldo Kasir)
+  var sheetOpname = ss.getSheetByName('KasOpnameKasir') || ss.getSheetByName('KasOpname');
+  var kasOpnameData = null;
+  if (sheetOpname) {
+    var dataOpnameRows = sheetOpname.getDataRange().getValues();
+    if (dataOpnameRows.length > 1) {
+      var latestRow = dataOpnameRows[dataOpnameRows.length - 1];
+      if (latestRow[0] && String(latestRow[0]).trim() !== '') {
+        var parsedDenom = {};
+        try {
+          if (latestRow[8]) {
+            parsedDenom = typeof latestRow[8] === 'string' ? JSON.parse(latestRow[8]) : latestRow[8];
+          }
+        } catch (e) {
+          parsedDenom = {};
+        }
+        kasOpnameData = {
+          id: String(latestRow[0]),
+          tanggal: latestRow[1] ? Utilities.formatDate(new Date(latestRow[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+          saldoFisikKasir: Number(latestRow[2]) || 0,
+          saldoStandarBuku: Number(latestRow[3]) || 0,
+          selisih: Number(latestRow[4]) || 0,
+          statusSelisih: String(latestRow[5] || 'PAS'),
+          modeKasBelumSetor: String(latestRow[6] || 'auto'),
+          customKasBelumSetor: Number(latestRow[7]) || 0,
+          denominations: parsedDenom,
+          catatan: String(latestRow[9] || ''),
+          updatedAt: String(latestRow[10] || '')
+        };
+      }
+    }
+  }
+
   var response = {
     status: 'success',
     timestamp: new Date().toISOString(),
@@ -276,7 +320,8 @@ function doGet(e) {
     biayaProses: biayaProses,
     bukuBiayaProses: biayaProses,
     pinjamanSkum: pinjamanSkum,
-    pinjamanSaldo: pinjamanSkum
+    pinjamanSaldo: pinjamanSkum,
+    kasOpname: kasOpnameData
   };
 
   return ContentService.createTextOutput(JSON.stringify(response))
@@ -304,6 +349,9 @@ function doPost(e) {
       }
       if (payload.pinjamanSkum && Array.isArray(payload.pinjamanSkum)) {
         writePinjamanSkumToSheet(ss, payload.pinjamanSkum);
+      }
+      if (payload.kasOpname) {
+        writeKasOpnameToSheet(ss, payload.kasOpname);
       }
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Sync all complete' })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -532,6 +580,50 @@ function doPost(e) {
       } else {
         sheet.appendRow(rowValues);
       }
+    } else if (action === 'update_kas_opname' || action === 'save_kas_opname') {
+      var sheet = ss.getSheetByName('KasOpnameKasir') || ss.getSheetByName('KasOpname');
+      if (!sheet) {
+        sheet = ss.insertSheet('KasOpnameKasir');
+        sheet.appendRow([
+          'ID', 'Tanggal', 'Saldo Fisik Kasir (Rp)', 'Saldo Standar Buku (Rp)', 'Selisih (Rp)',
+          'Status Selisih', 'Mode Kas Belum Setor', 'Custom Kas Belum Setor (Rp)', 'Pecahan Denominasi JSON', 'Catatan', 'Updated At'
+        ]);
+        sheet.getRange('A1:K1').setFontWeight('bold').setBackground('#c7d2fe');
+      }
+      var denomStr = typeof record.denominations === 'object' ? JSON.stringify(record.denominations) : String(record.denominations || '');
+      var rowValues = [
+        record.id || 'kas-opname-latest',
+        record.tanggal || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+        Number(record.saldoFisikKasir) || 0,
+        Number(record.saldoStandarBuku) || 0,
+        Number(record.selisih) || 0,
+        String(record.statusSelisih || (Number(record.selisih) === 0 ? 'PAS' : Number(record.selisih) > 0 ? 'SURPLUS' : 'DEFISIT')),
+        String(record.modeKasBelumSetor || 'auto'),
+        Number(record.customKasBelumSetor) || 0,
+        denomStr,
+        String(record.catatan || ''),
+        record.updatedAt || new Date().toISOString()
+      ];
+
+      var dataRows = sheet.getDataRange().getValues();
+      var rowIndex = -1;
+      var targetId = String(record.id || 'kas-opname-latest').trim();
+
+      if (dataRows.length > 1) {
+        for (var ko = 1; ko < dataRows.length; ko++) {
+          var rowId = String(dataRows[ko][0] || '').trim();
+          if (targetId && rowId === targetId) {
+            rowIndex = ko + 1;
+            break;
+          }
+        }
+      }
+
+      if (rowIndex > 1) {
+        sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+      } else {
+        sheet.appendRow(rowValues);
+      }
     } else if (action === 'delete_pinjaman_skum' || action === 'delete_pinjaman_saldo') {
       var sheet = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM');
       if (sheet) {
@@ -622,6 +714,33 @@ function writePinjamanSkumToSheet(ss, records) {
       r.skumPengeluaranId || '', r.skumPengembalianId || '', r.createdAt || ''
     ]);
   });
+}
+
+function writeKasOpnameToSheet(ss, record) {
+  var sheet = ss.getSheetByName('KasOpnameKasir') || ss.getSheetByName('KasOpname');
+  if (!sheet) {
+    sheet = ss.insertSheet('KasOpnameKasir');
+  }
+  var denomStr = typeof record.denominations === 'object' ? JSON.stringify(record.denominations) : String(record.denominations || '');
+  sheet.clearContents();
+  sheet.appendRow([
+    'ID', 'Tanggal', 'Saldo Fisik Kasir (Rp)', 'Saldo Standar Buku (Rp)', 'Selisih (Rp)',
+    'Status Selisih', 'Mode Kas Belum Setor', 'Custom Kas Belum Setor (Rp)', 'Pecahan Denominasi JSON', 'Catatan', 'Updated At'
+  ]);
+  sheet.getRange('A1:K1').setFontWeight('bold').setBackground('#c7d2fe');
+  sheet.appendRow([
+    record.id || 'kas-opname-latest',
+    record.tanggal || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+    Number(record.saldoFisikKasir) || 0,
+    Number(record.saldoStandarBuku) || 0,
+    Number(record.selisih) || 0,
+    String(record.statusSelisih || 'PAS'),
+    String(record.modeKasBelumSetor || 'auto'),
+    Number(record.customKasBelumSetor) || 0,
+    denomStr,
+    String(record.catatan || ''),
+    record.updatedAt || new Date().toISOString()
+  ]);
 }`;
 
 

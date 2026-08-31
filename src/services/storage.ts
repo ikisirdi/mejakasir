@@ -1,4 +1,4 @@
-import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord } from '../types';
+import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData } from '../types';
 import { INITIAL_CASE_RECORDS } from '../data/initialData';
 
 const STORAGE_KEYS = {
@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   BIAYA_PROSES: 'pa_perkara_biaya_proses_v2',
   JURNAL_SKUM: 'pa_perkara_jurnal_skum_v1',
   PINJAMAN_SKUM: 'pa_perkara_pinjaman_skum_v1',
+  KAS_OPNAME: 'pa_perkara_kas_opname_v1',
 };
 
 export const INITIAL_BIAYA_PROSES_RECORDS: BiayaProsesRecord[] = [];
@@ -234,6 +235,43 @@ export class StorageService {
       localStorage.setItem(STORAGE_KEYS.PINJAMAN_SKUM, JSON.stringify(records));
     } catch (e) {
       console.error('Error saving pinjaman skum records:', e);
+    }
+  }
+
+  static getKasOpname(): KasOpnameData | null {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.KAS_OPNAME);
+      if (raw) {
+        return JSON.parse(raw);
+      }
+      // Fallback to legacy key if existing
+      const legacySaved = localStorage.getItem('jurnal_skum_aktual_kasir');
+      if (legacySaved !== null && !isNaN(Number(legacySaved))) {
+        return {
+          tanggal: new Date().toISOString().split('T')[0],
+          saldoFisikKasir: Number(legacySaved),
+          saldoStandarBuku: 0,
+          selisih: 0,
+          statusSelisih: 'PAS',
+          modeKasBelumSetor: 'auto',
+          customKasBelumSetor: 0,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    } catch (e) {
+      console.error('Error loading kas opname data:', e);
+    }
+    return null;
+  }
+
+  static saveKasOpname(data: KasOpnameData): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.KAS_OPNAME, JSON.stringify(data));
+      if (data.saldoFisikKasir !== undefined) {
+        localStorage.setItem('jurnal_skum_aktual_kasir', data.saldoFisikKasir.toString());
+      }
+    } catch (e) {
+      console.error('Error saving kas opname data:', e);
     }
   }
 
