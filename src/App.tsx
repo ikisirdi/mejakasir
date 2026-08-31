@@ -352,16 +352,21 @@ export default function App() {
           StorageService.saveJurnalSkumRecords(sortedJurnal);
         }
 
-        if (liveData.pinjamanSkum && liveData.pinjamanSkum.length > 0) {
-          setPinjamanSkumRecords(liveData.pinjamanSkum);
-          StorageService.savePinjamanSkumRecords(liveData.pinjamanSkum);
-        } else if (activeJurnal.length > 0) {
+        let combinedPinjaman = liveData.pinjamanSkum || [];
+        if (activeJurnal.length > 0) {
           const reconstructedPinjaman = SyncService.reconstructPinjamanFromJurnal(activeJurnal);
           if (reconstructedPinjaman.length > 0) {
-            setPinjamanSkumRecords(reconstructedPinjaman);
-            StorageService.savePinjamanSkumRecords(reconstructedPinjaman);
+            const existingKeys = new Set(combinedPinjaman.map(p => `${p.tanggal}-${p.jumlah}-${(p.peminjam||'').toLowerCase()}`));
+            reconstructedPinjaman.forEach(r => {
+              const key = `${r.tanggal}-${r.jumlah}-${(r.peminjam||'').toLowerCase()}`;
+              if (!existingKeys.has(key)) {
+                combinedPinjaman.push(r);
+              }
+            });
           }
         }
+        setPinjamanSkumRecords(combinedPinjaman);
+        StorageService.savePinjamanSkumRecords(combinedPinjaman);
 
         if (liveData.kasOpname) {
           StorageService.saveKasOpname(liveData.kasOpname);

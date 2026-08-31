@@ -6,6 +6,7 @@ import {
   BookOpen, 
   Search, 
   PlusCircle, 
+  Plus,
   Printer, 
   Trash2, 
   Edit3,
@@ -113,6 +114,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [isPinjamanModalOpen, setIsPinjamanModalOpen] = useState(false);
   const [isRiwayatPinjamanModalOpen, setIsRiwayatPinjamanModalOpen] = useState(false);
   const [isRekonsiliasiModalOpen, setIsRekonsiliasiModalOpen] = useState(false);
+  const [isDebetBreakdownModalOpen, setIsDebetBreakdownModalOpen] = useState(false);
   const [modeKasBelumSetor, setModeKasBelumSetor] = useState<'auto' | 'kuning' | 'all-unsettled' | 'custom'>('auto');
   const [customKasBelumSetor, setCustomKasBelumSetor] = useState<number>(0);
   const [pinjamTanggal, setPinjamTanggal] = useState(new Date().toISOString().split('T')[0]);
@@ -231,14 +233,34 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     setIsDenominationOpen(false);
   };
 
-  // Unpaid loans calculation
+  // Pinjaman & Piutang state and calculation
+  const [pinjamanFilterTab, setPinjamanFilterTab] = useState<'ALL' | 'BELUM_DIBAYAR' | 'SUDAH_DIBAYAR'>('ALL');
+
   const unpaidLoans = useMemo(() => {
     return (pinjamanRecords || []).filter(p => p.status === 'BELUM_DIBAYAR');
+  }, [pinjamanRecords]);
+
+  const paidLoans = useMemo(() => {
+    return (pinjamanRecords || []).filter(p => p.status === 'SUDAH_DIBAYAR');
   }, [pinjamanRecords]);
 
   const totalUnpaidAmount = useMemo(() => {
     return unpaidLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
   }, [unpaidLoans]);
+
+  const totalPaidAmount = useMemo(() => {
+    return paidLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
+  }, [paidLoans]);
+
+  const totalAllLoansAmount = useMemo(() => {
+    return (pinjamanRecords || []).reduce((sum, p) => sum + (p.jumlah || 0), 0);
+  }, [pinjamanRecords]);
+
+  const displayedPinjamanList = useMemo(() => {
+    if (pinjamanFilterTab === 'BELUM_DIBAYAR') return unpaidLoans;
+    if (pinjamanFilterTab === 'SUDAH_DIBAYAR') return paidLoans;
+    return pinjamanRecords || [];
+  }, [pinjamanFilterTab, unpaidLoans, paidLoans, pinjamanRecords]);
 
   // Deteksi rincian pinjaman: pinjaman kantor riil (sidkel) vs piutang kekurangan panjar pihak
   const loanBreakdown = useMemo(() => {
@@ -507,6 +529,68 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const totalKredit = filteredRecords.reduce((acc, r) => acc + (r.pengeluaran || 0), 0);
   const saldoSkum = totalDebet - totalKredit;
 
+  // Analisis Logika Penerimaan Debet SKUM:
+  // Memisahkan Panjar Awal Murni dari Perkara Masuk vs Pengembalian/Pelunasan Pinjaman Kasir
+  const debetBreakdown = useMemo(() => {
+    const casePanjars: { nomorPerkara: string; nominal: number; tanggal: string; uraian: string; jenisPerkara: string; namaPihak: string }[] = [];
+    const nonCaseDebets: { nomorPerkara: string; nominal: number; tanggal: string; uraian: string; kategori: string }[] = [];
+
+    let totalPanjarMurni = 0;
+    let totalNonPanjarDebet = 0;
+
+    filteredRecords.forEach(r => {
+      const pen = Number(r.penerimaan) || 0;
+      if (pen <= 0) return;
+
+      const isLoanRepayment = r.kategori === 'Pinjaman' || 
+        (r.uraian && (
+          r.uraian.toLowerCase().includes('pengembalian pinjaman') || 
+          r.uraian.toLowerCase().includes('pelunasan pinjaman') ||
+          r.uraian.toLowerCase().includes('pengembalian saldo') ||
+          r.uraian.toLowerCase().includes('titipan')
+        )) || (r.nomorPerkara && r.nomorPerkara.toLowerCase().includes('kepaniteraan'));
+
+      if (isLoanRepayment) {
+        totalNonPanjarDebet += pen;
+        nonCaseDebets.push({
+          nomorPerkara: r.nomorPerkara || 'Kepaniteraan / Kas General',
+          nominal: pen,
+          tanggal: r.tanggal || '-',
+          uraian: r.uraian || 'Pengembalian Pinjaman Saldo SKUM',
+          kategori: r.kategori || 'Pinjaman'
+        });
+      } else {
+        totalPanjarMurni += pen;
+        const matchingCase = cases.find(c => c.nomorPerkara && r.nomorPerkara && c.nomorPerkara.trim().toLowerCase() === r.nomorPerkara.trim().toLowerCase());
+        casePanjars.push({
+          nomorPerkara: r.nomorPerkara || '-',
+          nominal: pen,
+          tanggal: r.tanggal || '-',
+          uraian: r.uraian || 'Penerimaan Panjar Awal',
+          jenisPerkara: matchingCase?.jenisPerkara || (r.nomorPerkara?.includes('Pdt.G') ? 'Gugatan' : r.nomorPerkara?.includes('Pdt.P') ? 'Permohonan' : 'Perkara'),
+          namaPihak: matchingCase?.namaPihak || '-'
+        });
+      }
+    });
+
+    const gugatanPanjars = casePanjars.filter(c => c.nomorPerkara.includes('Pdt.G'));
+    const permohonanPanjars = casePanjars.filter(c => c.nomorPerkara.includes('Pdt.P'));
+    const totalGugatan = gugatanPanjars.reduce((s, c) => s + c.nominal, 0);
+    const totalPermohonan = permohonanPanjars.reduce((s, c) => s + c.nominal, 0);
+
+    return {
+      casePanjars,
+      nonCaseDebets,
+      totalPanjarMurni,
+      totalNonPanjarDebet,
+      gugatanPanjars,
+      permohonanPanjars,
+      totalGugatan,
+      totalPermohonan,
+      totalDebetMutasi: totalPanjarMurni + totalNonPanjarDebet
+    };
+  }, [filteredRecords, cases]);
+
   // Analisis Rincian Biaya Kas berdasarkan Status Setor:
   // 1. Biaya yang SUDAH DISETOR ke Bendahara Penerimaan / Kas Negara (Hijau)
   const totalBiayaSudahDisetor = useMemo(() => {
@@ -673,13 +757,25 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     saldoSkum: number;
     biayaKasBelumSetor: number;
     pinjamanKas: number;
+    totalDebetPanjarPerkara?: number;
+    totalDebetPengembalianPinjaman?: number;
   }) => {
     const { saldoFisikKasir, saldoStandarBuku, selisih, totalDebet, totalKredit, saldoSkum, biayaKasBelumSetor, pinjamanKas } = data;
+    const panjarMurni = data.totalDebetPanjarPerkara || debetBreakdown.totalPanjarMurni;
+    const nonPanjar = data.totalDebetPengembalianPinjaman || debetBreakdown.totalNonPanjarDebet;
+
+    const debetExplanationSection = `
+#### 🔍 Logika Perhitungan Debet SKUM Awal:
+- **Penerimaan Panjar Awal Murni (Perkara Masuk)**: **Rp ${panjarMurni.toLocaleString('id-ID')}** (${debetBreakdown.gugatanPanjars.length} Gugatan @ Rp ${debetBreakdown.gugatanPanjars.length > 0 ? (debetBreakdown.totalGugatan / debetBreakdown.gugatanPanjars.length).toLocaleString('id-ID') : 0} + ${debetBreakdown.permohonanPanjars.length} Permohonan @ Rp ${debetBreakdown.permohonanPanjars.length > 0 ? (debetBreakdown.totalPermohonan / debetBreakdown.permohonanPanjars.length).toLocaleString('id-ID') : 0}).
+- **Pengembalian / Pelunasan Pinjaman Kasir**: **Rp ${nonPanjar.toLocaleString('id-ID')}** (Pelunasan bon materai kepaniteraan).
+- **Total Mutasi Debet Jurnal SKUM Buku**: **Rp ${totalDebet.toLocaleString('id-ID')}** (Rp ${panjarMurni.toLocaleString('id-ID')} + Rp ${nonPanjar.toLocaleString('id-ID')}).
+*(Perhitungan manual panjar awal perkara masuk menghasilkan Rp ${panjarMurni.toLocaleString('id-ID')}; selisih Rp ${nonPanjar.toLocaleString('id-ID')} adalah transaksi pengembalian pinjaman bon kas)*.`;
 
     if (saldoFisikKasir === 0) {
       return `### 📋 Status Kas Opname: Belum Ada Input Uang Fisik Kasir
 - **Kas Standar Pembukuan**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
 - **Uang Fisik Kasir**: Rp 0 (Belum diisi)
+${debetExplanationSection}
 
 💡 **Petunjuk & Rekomendasi:**
 1. Masukkan nominal uang riil tunai di laci meja kasir pada kolom input.
@@ -692,6 +788,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 - **Uang Fisik Aktual di Kasir**: Rp ${saldoFisikKasir.toLocaleString('id-ID')}
 - **Kas Seharusnya (Buku Standar)**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
 - **Status Selisih**: **Rp 0 (NIHIL / PAS / BALANCE)**
+${debetExplanationSection}
 
 #### 🔍 Rincian Analisis Forensik:
 1. **Sisa Panjar Perkara Aktif**: Uang fisik yang dipegang kasir mencakup seluruh sisa panjar para pihak berperkara yang tercatat di Buku Jurnal SKUM (Rp ${totalSisaPanjarMurniPerkara.toLocaleString('id-ID')}).
@@ -708,6 +805,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 - **Uang Fisik Aktual Kasir**: Rp ${saldoFisikKasir.toLocaleString('id-ID')}
 - **Kas Seharusnya (Buku Standar)**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
 - **Surplus Uang Kas**: **+ Rp ${selisih.toLocaleString('id-ID')}** (Uang riil di laci kasir LEBIH BESAR daripada buku)
+${debetExplanationSection}
 
 #### 🔍 Diagnostik Akar Masalah (Mengapa Uang Fisik Lebih?):
 1. **Penerimaan Belum Terbukukan**: Kemungkinan ada panjar tambahan, titipan sisa pihak perkara lain, atau biaya fotokopi/redaksi yang telah diserahkan tunai ke kasir namun belum terinput pada Buku Jurnal SKUM.
@@ -725,6 +823,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 - **Uang Fisik Aktual Kasir**: Rp ${saldoFisikKasir.toLocaleString('id-ID')}
 - **Kas Seharusnya (Buku Standar)**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
 - **Defisit Uang Kas**: **- Rp ${absSelisih.toLocaleString('id-ID')}** (Uang riil di laci kasir KURANG dibanding buku)
+${debetExplanationSection}
 
 #### 🔍 Diagnostik Akar Masalah (Mengapa Uang Fisik Kurang?):
 1. **Pinjaman / Bon Sementara Belum Tercatat**: Ada pengeluaran operasional mendesak (seperti transport sidang keliling, materai, ATK) yang uangnya sudah diambil namun bon kasir belum dimasukkan ke sistem pinjaman. Total pinjaman kepaniteraan tercatat saat ini: **Rp ${pinjamanKas.toLocaleString('id-ID')}**.
@@ -758,6 +857,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
         saldoSkum,
         biayaKasBelumSetor: effectiveBiayaKasBelumDisetor,
         pinjamanKas: effectiveUnpaidLoanAmount,
+        totalDebetPanjarPerkara: debetBreakdown.totalPanjarMurni,
+        totalDebetPengembalianPinjaman: debetBreakdown.totalNonPanjarDebet,
         casesSummary,
         denominations
       };
@@ -787,7 +888,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
         totalKredit,
         saldoSkum,
         biayaKasBelumSetor: effectiveBiayaKasBelumDisetor,
-        pinjamanKas: effectiveUnpaidLoanAmount
+        pinjamanKas: effectiveUnpaidLoanAmount,
+        totalDebetPanjarPerkara: debetBreakdown.totalPanjarMurni,
+        totalDebetPengembalianPinjaman: debetBreakdown.totalNonPanjarDebet
       }));
     } finally {
       setIsAiAuditing(false);
@@ -1196,174 +1299,288 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
         </div>
       </div>
 
-      {/* BOX INFORMASI KHUSUS PERINGATAN PEMINJAMAN SALDO SKUM */}
-      {unpaidLoans.length > 0 ? (
-        <div className={`p-4 sm:p-5 rounded-2xl border-2 shadow-lg transition-all ${
-          isLight 
-            ? 'bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100/80 border-amber-400 text-slate-900 shadow-amber-100' 
-            : 'bg-gradient-to-r from-amber-950/90 via-orange-950/70 to-slate-900 border-amber-500/80 text-amber-100 shadow-amber-950/50'
-        }`}>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-amber-200/80 dark:border-amber-800/60">
-            <div className="flex items-start sm:items-center space-x-3">
-              <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-md animate-pulse shrink-0">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-black text-base sm:text-lg tracking-tight text-amber-900 dark:text-amber-200">
-                    PERINGATAN: TERDAPAT PEMINJAMAN SALDO SKUM KEPANITERAAN
-                  </h3>
+      {/* PANEL VIEWCARD: PINJAMAN SALDO & PIUTANG SKUM KEPANITERAAN */}
+      <div className={`p-4 sm:p-5 rounded-2xl border-2 shadow-lg transition-all ${
+        unpaidLoans.length > 0
+          ? isLight 
+            ? 'bg-gradient-to-r from-amber-50/90 via-orange-50/80 to-amber-100/70 border-amber-400 text-slate-900 shadow-amber-100/50' 
+            : 'bg-gradient-to-r from-amber-950/80 via-orange-950/60 to-slate-900 border-amber-500/80 text-amber-100 shadow-amber-950/50'
+          : isLight
+            ? 'bg-gradient-to-r from-slate-50 via-indigo-50/30 to-slate-100/70 border-slate-300 text-slate-900 shadow-slate-100'
+            : 'bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border-slate-700 text-slate-100'
+      }`}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-amber-200/80 dark:border-amber-800/60">
+          <div className="flex items-start sm:items-center space-x-3">
+            <div className={`p-2.5 rounded-xl text-white shadow-md shrink-0 ${
+              unpaidLoans.length > 0 ? 'bg-amber-500 animate-pulse' : 'bg-indigo-600'
+            }`}>
+              <HandCoins className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-black text-base sm:text-lg tracking-tight text-slate-900 dark:text-amber-200">
+                  PANEL PINJAMAN SALDO & PIUTANG PANJAR SKUM
+                </h3>
+                {unpaidLoans.length > 0 ? (
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-red-600 text-white shadow-sm flex items-center space-x-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
-                    <span>{unpaidLoans.length} BELUM DIBAYAR</span>
+                    <span>{unpaidLoans.length} BELUM LUNAS</span>
                   </span>
-                </div>
-                <p className="text-xs sm:text-sm text-amber-800/90 dark:text-amber-300/90 mt-0.5">
-                  Saldo SKUM sementara terpotong untuk keperluan kepaniteraan (tidak masuk Buku Bantu Biaya Proses). Tekan tombol <span className="font-extrabold underline">Sudah Dibayar</span> setelah dana dikembalikan agar saldo SKUM utuh kembali.
-                </p>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-600 text-white shadow-sm flex items-center space-x-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>SEMUA LUNAS</span>
+                  </span>
+                )}
               </div>
-            </div>
-            
-            <div className="flex items-center space-x-3 self-end md:self-auto shrink-0">
-              <div className="text-right">
-                <span className="text-[10px] uppercase font-bold text-amber-800 dark:text-amber-400 block">Total Dipinjam</span>
-                <span className="text-lg sm:text-xl font-black font-mono text-red-600 dark:text-red-400">
-                  Rp {totalUnpaidAmount.toLocaleString('id-ID')}
-                </span>
-              </div>
-              <button
-                onClick={() => setIsRiwayatPinjamanModalOpen(true)}
-                className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center space-x-1.5 shadow-sm ${
-                  isLight 
-                    ? 'bg-white hover:bg-amber-100 text-amber-900 border-amber-300' 
-                    : 'bg-slate-800 hover:bg-slate-700 text-amber-200 border-amber-700'
-                }`}
-              >
-                <Clock className="w-3.5 h-3.5" />
-                <span>Riwayat Pinjaman ({pinjamanRecords.length})</span>
-              </button>
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-amber-300/90 mt-0.5">
+                Monitoring transaksi pinjaman operasional kantor (Sidkel), bon materai, dan piutang panjar perkara kepaniteraan.
+              </p>
             </div>
           </div>
-
-          {/* Cards list of active unpaid loans as evidence */}
-          <div className="mt-3.5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {unpaidLoans.map((p) => (
-              <div key={p.id} className={`p-3.5 rounded-xl border flex flex-col justify-between transition-all ${
-                isLight 
-                  ? 'bg-white/95 border-amber-300/90 shadow-sm hover:shadow-md' 
-                  : 'bg-slate-900/95 border-amber-800/90 shadow-md'
+          
+          <div className="flex items-center flex-wrap gap-2.5 self-start md:self-auto shrink-0">
+            <div className="text-right mr-1">
+              <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-amber-400 block">Belum Dibayar</span>
+              <span className={`text-base sm:text-lg font-black font-mono ${
+                totalUnpaidAmount > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'
               }`}>
-                <div>
-                  <div className="flex items-center justify-between gap-1 mb-1.5">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                      {p.nomorPerkara}
-                    </span>
-                    <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                      📅 {p.tanggal}
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">
-                    👤 {p.peminjam}
-                  </h4>
-                  {p.keterangan && (
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2 italic bg-slate-50 dark:bg-slate-800/50 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                      "{p.keterangan}"
-                    </p>
-                  )}
-                  <div className="mt-2 text-right">
-                    <span className="text-[10px] text-slate-400 block">Nominal Dipinjam</span>
-                    <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400">
-                      Rp {p.jumlah.toLocaleString('id-ID')}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 flex items-center space-x-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
-                    <span>Belum Dibayar</span>
-                  </span>
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Konfirmasi Pelunasan Pinjaman:\n\nApakah uang saldo SKUM sebesar Rp ${p.jumlah.toLocaleString('id-ID')} dari peminjam "${p.peminjam}" (${p.nomorPerkara}) telah DIBAYAR & DIKEMBALIKAN ke Saldo SKUM?`)) {
-                        onBayarPinjaman?.(p.id);
-                      }
-                    }}
-                    className="px-3 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm hover:shadow transition-all flex items-center space-x-1.5 active:scale-95"
-                    title="Tekan jika uang sudah dikembalikan ke kas SKUM"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Sudah Dibayar</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div className={`p-3 rounded-xl border flex items-center justify-between text-xs transition-all ${
-          isLight ? 'bg-emerald-50/60 border-emerald-200 text-emerald-800' : 'bg-emerald-950/30 border-emerald-900/60 text-emerald-300'
-        }`}>
-          <div className="flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>
-              <strong>Status Saldo SKUM Kepaniteraan:</strong> Tidak ada peminjam saldo SKUM yang tertunggak. Semua saldo SKUM berada dalam kondisi utuh.
-            </span>
-          </div>
-          {pinjamanRecords.length > 0 && (
+                Rp {totalUnpaidAmount.toLocaleString('id-ID')}
+              </span>
+            </div>
+            <button
+              onClick={() => setIsPinjamanModalOpen(true)}
+              className="px-3 py-2 rounded-xl text-xs font-black bg-amber-600 hover:bg-amber-500 text-white shadow-sm transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer"
+              title="Tambah Catatan Pinjaman Saldo SKUM Baru"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ Pinjam Saldo</span>
+            </button>
             <button
               onClick={() => setIsRiwayatPinjamanModalOpen(true)}
-              className="text-xs font-bold underline hover:no-underline text-emerald-700 dark:text-emerald-400 shrink-0 ml-2"
+              className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer ${
+                isLight 
+                  ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300' 
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-200 border-amber-700'
+              }`}
             >
-              Lihat Riwayat ({pinjamanRecords.length})
+              <Clock className="w-3.5 h-3.5" />
+              <span>Riwayat ({pinjamanRecords.length})</span>
             </button>
-          )}
+          </div>
         </div>
-      )}
 
-      {/* Summary Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Filter Tabs for Pinjaman */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center space-x-1.5 p-1 rounded-xl bg-black/5 dark:bg-white/5 border border-slate-200 dark:border-slate-800 text-xs">
+            <button
+              onClick={() => setPinjamanFilterTab('ALL')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
+                pinjamanFilterTab === 'ALL'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs font-extrabold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              Semua ({pinjamanRecords.length})
+            </button>
+            <button
+              onClick={() => setPinjamanFilterTab('BELUM_DIBAYAR')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center space-x-1 ${
+                pinjamanFilterTab === 'BELUM_DIBAYAR'
+                  ? 'bg-red-600 text-white shadow-xs font-extrabold'
+                  : 'text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40'
+              }`}
+            >
+              <span>Belum Lunas ({unpaidLoans.length})</span>
+            </button>
+            <button
+              onClick={() => setPinjamanFilterTab('SUDAH_DIBAYAR')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center space-x-1 ${
+                pinjamanFilterTab === 'SUDAH_DIBAYAR'
+                  ? 'bg-emerald-600 text-white shadow-xs font-extrabold'
+                  : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+              }`}
+            >
+              <span>Sudah Lunas ({paidLoans.length})</span>
+            </button>
+          </div>
+
+          <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+            Total Nilai Transaksi: <strong className="font-mono text-slate-800 dark:text-slate-200">Rp {totalAllLoansAmount.toLocaleString('id-ID')}</strong>
+          </div>
+        </div>
+
+        {/* Cards list of loans */}
+        {displayedPinjamanList.length > 0 ? (
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {displayedPinjamanList.map((p) => {
+              const isPiutang = ((p.keterangan || '') + ' ' + (p.peminjam || '')).toLowerCase().includes('panjar tidak lengkap') ||
+                                ((p.keterangan || '') + ' ' + (p.peminjam || '')).toLowerCase().includes('skul panjar');
+              const isSidkel = ((p.keterangan || '') + ' ' + (p.peminjam || '')).toLowerCase().includes('sidkel') ||
+                               ((p.keterangan || '') + ' ' + (p.peminjam || '')).toLowerCase().includes('sidang keliling');
+              return (
+                <div key={p.id} className={`p-3.5 rounded-xl border flex flex-col justify-between transition-all ${
+                  p.status === 'BELUM_DIBAYAR'
+                    ? isLight 
+                      ? 'bg-white/95 border-amber-300/90 shadow-sm hover:shadow-md' 
+                      : 'bg-slate-900/95 border-amber-800/90 shadow-md'
+                    : isLight
+                      ? 'bg-slate-50/90 border-slate-200 opacity-90'
+                      : 'bg-slate-900/60 border-slate-800 opacity-80'
+                }`}>
+                  <div>
+                    <div className="flex items-center justify-between gap-1 mb-1.5">
+                      <div className="flex items-center space-x-1">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                          {p.nomorPerkara}
+                        </span>
+                        {isPiutang && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200">
+                            Piutang Panjar
+                          </span>
+                        )}
+                        {isSidkel && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200">
+                            Operasional Sidkel
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                        📅 {p.tanggal}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">
+                      👤 {p.peminjam}
+                    </h4>
+                    {p.keterangan && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 line-clamp-2 italic bg-slate-100/70 dark:bg-slate-800/50 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                        "{p.keterangan}"
+                      </p>
+                    )}
+                    <div className="mt-2 text-right">
+                      <span className="text-[10px] text-slate-400 block">Nominal Transaksi</span>
+                      <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400">
+                        Rp {p.jumlah.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                    {p.status === 'BELUM_DIBAYAR' ? (
+                      <>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 flex items-center space-x-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
+                          <span>Belum Dibayar</span>
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Konfirmasi Pelunasan Pinjaman:\n\nApakah uang saldo SKUM sebesar Rp ${p.jumlah.toLocaleString('id-ID')} dari peminjam "${p.peminjam}" (${p.nomorPerkara}) telah DIBAYAR & DIKEMBALIKAN ke Saldo SKUM?`)) {
+                              onBayarPinjaman?.(p.id);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm hover:shadow transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer"
+                          title="Tekan jika uang sudah dikembalikan ke kas SKUM"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Sudah Dibayar</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 flex items-center space-x-1">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span>Sudah Lunas</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {p.tanggalBayar ? `Lunas: ${p.tanggalBayar}` : 'Terselesaikan'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-3 p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-500">
+            Tidak ada catatan pinjaman pada kategori filter ini.
+          </div>
+        )}
+      </div>
+
+      {/* Summary Stat Cards (5 Cards Grid) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
         
-        {/* Total Debet (Penerimaan Panjar) */}
-        <div className={`p-4 rounded-2xl border shadow-sm ${
-          isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Debet SKUM</span>
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
-              <TrendingUp className="w-4 h-4" />
+        {/* Card 1: Total Debet (Penerimaan Panjar Awal Perkara Masuk) */}
+        <div 
+          onClick={() => setIsDebetBreakdownModalOpen(true)}
+          className={`p-3.5 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 relative group flex flex-col justify-between ${
+            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+          }`}
+          title="Klik untuk melihat bedah rincian Panjar Awal per perkara masuk vs Pengembalian Pinjaman"
+        >
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center space-x-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Panjar Awal (Debet)</span>
+                <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black">
+                  {debetBreakdown.casePanjars.length} Perkara
+                </span>
+              </div>
+              <div className="p-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <TrendingUp className="w-3.5 h-3.5" />
+              </div>
             </div>
-          </div>
-          <div className="font-mono text-xl font-extrabold text-emerald-600 dark:text-emerald-400">
-            Rp {totalDebet.toLocaleString('id-ID')}
-          </div>
-          <span className="text-[10px] text-slate-400 block mt-1">Penerimaan Panjar Awal & Tambahan</span>
-        </div>
-
-        {/* Total Kredit (Pengeluaran Biaya SKUM) */}
-        <div className={`p-4 rounded-2xl border shadow-sm ${
-          isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Kredit SKUM</span>
-            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600">
-              <TrendingDown className="w-4 h-4" />
+            <div className="font-mono text-lg font-extrabold text-emerald-600 dark:text-emerald-400">
+              Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
             </div>
-          </div>
-          <div className="font-mono text-xl font-extrabold text-rose-600 dark:text-rose-400">
-            Rp {totalKredit.toLocaleString('id-ID')}
-          </div>
-          <div className="flex items-center justify-between mt-1 text-[10px]">
-            <span className="text-slate-400">Potongan Biaya Jurnal SKUM</span>
-            {effectiveBiayaKasBelumDisetor > 0 && (
-              <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
-                🟡 Belum Setor: Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+            <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[9px]">
+              <span className="text-slate-500 dark:text-slate-400">
+                {debetBreakdown.totalNonPanjarDebet > 0 
+                  ? `+ Rp ${debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')} Bon` 
+                  : 'Panjar Murni'}
               </span>
-            )}
+              <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                Mutasi: Rp {totalDebet.toLocaleString('id-ID')}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[9px] text-indigo-600 dark:text-indigo-400 font-semibold group-hover:underline">
+            <span>🔍 8 Panjar Masuk</span>
+            <ArrowRight className="w-2.5 h-2.5" />
           </div>
         </div>
 
-        {/* Saldo SKUM Perkara */}
+        {/* Card 2: Total Kredit (Pengeluaran Biaya SKUM) */}
+        <div className={`p-3.5 rounded-2xl border shadow-sm flex flex-col justify-between ${
+          isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+        }`}>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Kredit SKUM</span>
+              <div className="p-1 rounded-lg bg-rose-500/10 text-rose-600">
+                <TrendingDown className="w-3.5 h-3.5" />
+              </div>
+            </div>
+            <div className="font-mono text-lg font-extrabold text-rose-600 dark:text-rose-400">
+              Rp {totalKredit.toLocaleString('id-ID')}
+            </div>
+            <div className="flex items-center justify-between mt-1 text-[9px]">
+              <span className="text-slate-400">Potongan Jurnal SKUM</span>
+              {effectiveBiayaKasBelumDisetor > 0 && (
+                <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
+                  🟡 Belum: Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="text-[9px] text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            {records.length} Transaksi Biaya
+          </div>
+        </div>
+
+        {/* Card 3: Saldo Perkara SKUM */}
         <div 
           onClick={() => {
             setIsSkumMinusModalOpen(true);
@@ -1374,120 +1591,116 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               setSelectedSkumMonth('01');
             }
           }}
-          className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-sky-500 hover:shadow-md active:scale-98 ${
+          className={`p-3.5 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-sky-500 hover:shadow-md active:scale-98 flex flex-col justify-between ${
             isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
           }`}
           title="Klik untuk melihat rincian & analisis saldo SKUM per bulan"
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Saldo Perkara SKUM</span>
-            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
-              saldoSkum < 0 
-                ? 'bg-rose-100 text-rose-800 border border-rose-300 animate-pulse' 
-                : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Saldo Buku SKUM</span>
+              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                saldoSkum < 0 
+                  ? 'bg-rose-100 text-rose-800 border border-rose-300 animate-pulse' 
+                  : 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
+              }`}>
+                {saldoSkum < 0 ? '⚠️ MINUS' : '🔍 Bulanan'}
+              </span>
+            </div>
+            <div className={`font-mono text-lg font-extrabold ${
+              saldoSkum < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-sky-600 dark:text-sky-400'
             }`}>
-              {saldoSkum < 0 ? '⚠️ MINUS - Klik Rincian' : '🔍 Rincian Bulanan'}
-            </span>
+              Rp {saldoSkum.toLocaleString('id-ID')}
+            </div>
+            <span className="text-[9px] text-slate-400 block mt-1">Debet - Kredit Berjalan</span>
           </div>
-          <div className={`font-mono text-xl font-extrabold ${
-            saldoSkum < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-sky-600 dark:text-sky-400'
-          }`}>
-            Rp {saldoSkum.toLocaleString('id-ID')}
+          <div className="text-[9px] text-sky-600 dark:text-sky-400 font-semibold pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            Klik Bedah Rincian
           </div>
-          <span className="text-[10px] text-slate-400 block mt-1">Debet Dikurangi Kredit Berjalan (Buku SKUM)</span>
         </div>
 
-        {/* Saldo Sesungguhnya / Saldo Sebenarnya di Kasir */}
+        {/* Card 4: Pinjaman & Piutang SKUM */}
+        <div 
+          onClick={() => setIsRiwayatPinjamanModalOpen(true)}
+          className={`p-3.5 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-amber-500 hover:shadow-md active:scale-98 flex flex-col justify-between ${
+            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+          }`}
+          title="Klik untuk membuka Riwayat Pinjaman & Pelunasan Saldo SKUM"
+        >
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Pinjaman & Piutang</span>
+              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                unpaidLoans.length > 0
+                  ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 border border-red-200'
+                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+              }`}>
+                {unpaidLoans.length > 0 ? `${unpaidLoans.length} Belum Lunas` : 'Lunas'}
+              </span>
+            </div>
+            <div className="font-mono text-lg font-extrabold text-amber-600 dark:text-amber-400">
+              Rp {totalUnpaidAmount.toLocaleString('id-ID')}
+            </div>
+            <div className="mt-1 text-[9px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+              <span>{loanBreakdown.officeLoans > 0 ? 'Sidkel: Rp 660rb' : 'Semua Lunas'}</span>
+              <span>{pinjamanRecords.length} Riwayat</span>
+            </div>
+          </div>
+          <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[9px] text-amber-600 dark:text-amber-400 font-semibold">
+            <span>⚙️ Kelola Pinjaman</span>
+            <ArrowRight className="w-2.5 h-2.5" />
+          </div>
+        </div>
+
+        {/* Card 5: Saldo Sesungguhnya / Saldo Sebenarnya di Kasir */}
         <div 
           onClick={() => setIsRekonsiliasiModalOpen(true)}
-          className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 relative group flex flex-col justify-between ${
+          className={`p-3.5 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 relative group flex flex-col justify-between ${
             isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
           }`}
           title="Klik untuk membuka Diagnostik & Investigasi Kas Opname Kasir & Rekonsiliasi"
         >
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center space-x-1.5">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Saldo Sebenarnya</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center space-x-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Saldo Sebenarnya</span>
+                <span className="text-[8px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-black">
                   Kasir Riil
                 </span>
-                {modeKasBelumSetor === 'custom' && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-black">
-                    ⚡ Mode Kasir
-                  </span>
-                )}
               </div>
-              <div className="flex items-center space-x-1.5">
-                {effectiveBiayaKasBelumDisetor > 0 && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                    + Kas Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
-                  </span>
-                )}
-                <div className={`p-1.5 rounded-xl ${
-                  auditKasFisikInput < 0 
-                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' 
-                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                }`}>
-                  <Wallet className="w-4 h-4" />
-                </div>
+              <div className={`p-1 rounded-lg ${
+                auditKasFisikInput < 0 
+                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' 
+                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              }`}>
+                <Wallet className="w-3.5 h-3.5" />
               </div>
             </div>
 
-            {/* Main Primary Metric: Total Saldo Sesungguhnya (Logika Debet SKUM Awal) */}
             <div className="flex items-baseline justify-between gap-1">
-              <div className={`font-mono text-xl font-extrabold ${
+              <div className={`font-mono text-lg font-extrabold ${
                 saldoSesungguhnya < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
               }`}>
                 Rp {saldoSesungguhnya.toLocaleString('id-ID')}
               </div>
-              <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                Saldo Sesungguhnya
-              </span>
             </div>
 
-            {/* Sub-info: Komparasi Fisik Aktual Kasir & Status Selisih */}
-            <div className={`mt-2 p-2 rounded-xl border flex items-center justify-between text-xs ${
-              selisihAuditKasir === 0
-                ? isLight ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900' : 'bg-emerald-950/30 border-emerald-800 text-emerald-200'
-                : selisihAuditKasir > 0
-                ? isLight ? 'bg-amber-50/70 border-amber-200 text-amber-900' : 'bg-amber-950/30 border-amber-800 text-amber-200'
-                : isLight ? 'bg-rose-50/70 border-rose-200 text-rose-900' : 'bg-rose-950/30 border-rose-800 text-rose-200'
-            }`}>
-              <div className="flex items-center space-x-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Fisik Kasir:
-                </span>
-                <span className="font-mono font-black text-xs">
-                  Rp {auditKasFisikInput.toLocaleString('id-ID')}
-                </span>
-              </div>
-              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-900 border shadow-2xs">
-                {selisihAuditKasir === 0 
-                  ? '✓ Pas 100%' 
-                  : selisihAuditKasir > 0 
-                  ? `+Rp ${selisihAuditKasir.toLocaleString('id-ID')} Surplus` 
-                  : `-Rp ${Math.abs(selisihAuditKasir).toLocaleString('id-ID')} Defisit`}
+            {/* Sub-info: Fisik Kasir & Selisih */}
+            <div className="mt-1 flex items-center justify-between text-[9px]">
+              <span className="text-slate-500 dark:text-slate-400">
+                Fisik: <strong className="font-mono text-slate-800 dark:text-slate-200">Rp {auditKasFisikInput.toLocaleString('id-ID')}</strong>
+              </span>
+              <span className={`font-black px-1 py-0.5 rounded ${
+                selisihAuditKasir === 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {selisihAuditKasir === 0 ? '✓ Pas' : selisihAuditKasir > 0 ? `+Rp ${selisihAuditKasir.toLocaleString('id-ID')}` : `-Rp ${Math.abs(selisihAuditKasir).toLocaleString('id-ID')}`}
               </span>
             </div>
           </div>
 
-          <div className="mt-2 space-y-1">
-            <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-              <span>Sisa Panjar + Kas Belum Setor</span>
-              <span className="font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1 group-hover:underline">
-                <span>🔍 Diagnostik Kasir</span>
-                <ArrowRight className="w-2.5 h-2.5" />
-              </span>
-            </div>
-            <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800/80 text-[9px]">
-              <span className="text-slate-500 dark:text-slate-400 font-medium">
-                Ditotal dg disetor: <strong className="text-slate-800 dark:text-slate-200">Rp {(saldoSesungguhnya + biayaKasKeluarDisetor - effectiveUnpaidLoanAmount).toLocaleString('id-ID')}</strong>
-              </span>
-              <span className="font-black text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                <Check className="w-3 h-3 text-emerald-500" /> Sesuai Debet
-              </span>
-            </div>
+          <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold group-hover:underline">
+            <span>🔍 Diagnostik Kasir</span>
+            <ArrowRight className="w-2.5 h-2.5" />
           </div>
         </div>
 
@@ -4116,6 +4329,204 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                 className="px-5 py-2 bg-slate-800 text-white hover:bg-slate-700 rounded-xl font-bold text-xs"
               >
                 Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Bedah Rincian & Logika Debet SKUM Awal */}
+      {isDebetBreakdownModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className={`w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl shadow-2xl border transition-all ${
+            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+          }`}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b flex items-center justify-between shrink-0 border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-500 text-white rounded-xl shadow-xs">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Bedah Rincian & Logika Perhitungan Debet SKUM</span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                      Audit Penerimaan
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Transparansi perhitungan Panjar Awal Perkara Masuk (Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}) vs Mutasi Debet Buku (Rp {totalDebet.toLocaleString('id-ID')})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsDebetBreakdownModalOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto space-y-5 text-xs">
+              
+              {/* Formula Clarification Card */}
+              <div className={`p-4 rounded-2xl border ${
+                isLight ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950' : 'bg-emerald-950/30 border-emerald-900/60 text-emerald-100'
+              }`}>
+                <h4 className="font-extrabold text-sm mb-1.5 flex items-center gap-1.5 text-emerald-900 dark:text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>Penjelasan Logika Perhitungan Angka Debet:</span>
+                </h4>
+                <p className="leading-relaxed text-[11px] mb-3 text-slate-700 dark:text-slate-300">
+                  Ketika Anda menghitung ulang <strong>panjar awal dari seluruh perkara yang masuk</strong>, totalnya adalah 
+                  <strong className="text-emerald-700 dark:text-emerald-300 font-mono"> Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}</strong> ({debetBreakdown.casePanjars.length} Perkara). 
+                  Sedangkan angka <strong>Rp {totalDebet.toLocaleString('id-ID')}</strong> pada pembukuan Jurnal SKUM adalah <strong>Total Mutasi Debet</strong> yang mencakup pengembalian saldo pinjaman materai kasir sebesar 
+                  <strong className="text-amber-700 dark:text-amber-300 font-mono"> Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}</strong>.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 shadow-xs">
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">1. Panjar Murni Perkara Masuk</span>
+                    <span className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400">
+                      Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
+                    </span>
+                    <span className="text-[9px] text-slate-400 block mt-0.5">
+                      {debetBreakdown.gugatanPanjars.length} Gugatan + {debetBreakdown.permohonanPanjars.length} Permohonan
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 shadow-xs">
+                    <span className="text-[10px] text-amber-600 uppercase font-bold block mb-1">2. Pengembalian Pinjaman</span>
+                    <span className="font-mono text-base font-extrabold text-amber-600 dark:text-amber-400">
+                      + Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}
+                    </span>
+                    <span className="text-[9px] text-slate-400 block mt-0.5">
+                      Pelunasan bon materai (27/08/2026)
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-emerald-600 text-white shadow-xs">
+                    <span className="text-[10px] text-emerald-100 uppercase font-bold block mb-1">3. Total Mutasi Debet SKUM</span>
+                    <span className="font-mono text-base font-black">
+                      = Rp {totalDebet.toLocaleString('id-ID')}
+                    </span>
+                    <span className="text-[9px] text-emerald-100/80 block mt-0.5">
+                      Seluruh uang masuk ke buku SKUM
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table 1: Penerimaan Panjar Awal Perkara */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    <span>1. Rincian Panjar Awal {debetBreakdown.casePanjars.length} Perkara Masuk</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-bold text-slate-600 dark:text-slate-300">
+                      Total: Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
+                    </span>
+                  </h5>
+                </div>
+
+                <div className="border rounded-xl overflow-hidden border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="p-2.5 text-center w-8">No</th>
+                        <th className="p-2.5">Tanggal</th>
+                        <th className="p-2.5">Nomor Perkara</th>
+                        <th className="p-2.5">Jenis</th>
+                        <th className="p-2.5">Uraian Transaksi</th>
+                        <th className="p-2.5 text-right">Nominal Panjar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                      {debetBreakdown.casePanjars.map((c, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-2.5 text-center text-slate-400 text-[10px]">{idx + 1}</td>
+                          <td className="p-2.5 whitespace-nowrap text-slate-500 font-mono text-[11px]">{c.tanggal}</td>
+                          <td className="p-2.5 font-bold font-mono text-indigo-600 dark:text-indigo-400">{c.nomorPerkara}</td>
+                          <td className="p-2.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                              c.jenisPerkara === 'Gugatan' 
+                                ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' 
+                                : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                            }`}>
+                              {c.jenisPerkara}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-slate-600 dark:text-slate-300">{c.uraian}</td>
+                          <td className="p-2.5 text-right font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
+                            Rp {c.nominal.toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      ))}
+                      {/* Subtotal Row */}
+                      <tr className="bg-emerald-50/50 dark:bg-emerald-950/30 font-black border-t border-emerald-200 dark:border-emerald-800">
+                        <td colSpan={5} className="p-2.5 text-right text-emerald-900 dark:text-emerald-200">
+                          SUBTOTAL PANJAR AWAL {debetBreakdown.casePanjars.length} PERKARA MASUK:
+                        </td>
+                        <td className="p-2.5 text-right font-mono text-emerald-700 dark:text-emerald-300">
+                          Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Table 2: Penerimaan Non-Panjar / Pengembalian Pinjaman */}
+              {debetBreakdown.nonCaseDebets.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    <span>2. Rincian Pengembalian / Pelunasan Pinjaman Kas Masuk</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 font-bold text-amber-700 dark:text-amber-300">
+                      Total: Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}
+                    </span>
+                  </h5>
+
+                  <div className="border rounded-xl overflow-hidden border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-800/80 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                        <tr>
+                          <th className="p-2.5 text-center w-8">No</th>
+                          <th className="p-2.5">Tanggal</th>
+                          <th className="p-2.5">Akun / Referensi</th>
+                          <th className="p-2.5">Uraian Transaksi</th>
+                          <th className="p-2.5 text-right">Nominal Masuk</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                        {debetBreakdown.nonCaseDebets.map((nc, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                            <td className="p-2.5 text-center text-slate-400 text-[10px]">{idx + 1}</td>
+                            <td className="p-2.5 whitespace-nowrap text-slate-500 font-mono text-[11px]">{nc.tanggal}</td>
+                            <td className="p-2.5 font-bold font-mono text-amber-700 dark:text-amber-400">{nc.nomorPerkara}</td>
+                            <td className="p-2.5 text-slate-600 dark:text-slate-300">{nc.uraian}</td>
+                            <td className="p-2.5 text-right font-mono font-extrabold text-amber-600 dark:text-amber-400">
+                              + Rp {nc.nominal.toLocaleString('id-ID')}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 border-slate-200 dark:border-slate-800">
+              <div className="text-[11px] text-slate-500">
+                Total Mutasi Debet SKUM = <strong>Rp {totalDebet.toLocaleString('id-ID')}</strong>
+              </div>
+              <button
+                onClick={() => setIsDebetBreakdownModalOpen(false)}
+                className="px-5 py-2 bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl font-bold text-xs shadow-xs"
+              >
+                Tutup Rincian
               </button>
             </div>
           </div>

@@ -38,6 +38,8 @@ async function startServer() {
         saldoSkum,
         biayaKasBelumSetor, 
         pinjamanKas, 
+        totalDebetPanjarPerkara,
+        totalDebetPengembalianPinjaman,
         casesSummary,
         denominations 
       } = req.body;
@@ -56,7 +58,9 @@ DATA REKONSILIASI KASIR:
 - Uang Fisik Aktual di Kasir (Input): Rp ${(Number(saldoFisikKasir) || 0).toLocaleString('id-ID')}
 - Saldo Kas Seharusnya (Buku Standar): Rp ${(Number(saldoStandarBuku) || 0).toLocaleString('id-ID')}
 - Selisih Kas Opname: Rp ${(Number(selisih) || 0).toLocaleString('id-ID')} (${Number(selisih) === 0 ? 'SEIMBANG/PAS' : Number(selisih) > 0 ? 'SURPLUS FISIK' : 'DEFISIT FISIK'})
-- Total Penerimaan (Debet SKUM): Rp ${(Number(totalDebet) || 0).toLocaleString('id-ID')}
+- Logika Penerimaan Panjar Murni Perkara Masuk: Rp ${(Number(totalDebetPanjarPerkara || totalDebet) || 0).toLocaleString('id-ID')}
+- Pengembalian / Pelunasan Pinjaman Kas Masuk: Rp ${(Number(totalDebetPengembalianPinjaman) || 0).toLocaleString('id-ID')}
+- Total Mutasi Debet SKUM Buku: Rp ${(Number(totalDebet) || 0).toLocaleString('id-ID')}
 - Total Pengeluaran (Kredit SKUM): Rp ${(Number(totalKredit) || 0).toLocaleString('id-ID')}
 - Saldo Jurnal SKUM (Debet - Kredit): Rp ${(Number(saldoSkum) || 0).toLocaleString('id-ID')}
 - Biaya Kas Belum Disetor ke Bendahara: Rp ${(Number(biayaKasBelumSetor) || 0).toLocaleString('id-ID')}
@@ -66,8 +70,8 @@ DATA REKONSILIASI KASIR:
 
 TUGAS ANDA:
 Berikan analisis audit komprehensif dalam bahasa Indonesia formal, profesional, dan sangat akurat:
-1. 📋 **Ringkasan Status Keuangan & Rekonsiliasi Kasir** (Jelaskan status uang fisik vs buku)
-2. 🔍 **Diagnostik & Identifikasi Akar Penyebab Selisih** (Berdasarkan angka selisih Rp ${(Number(selisih) || 0).toLocaleString('id-ID')}, analisis transaksi yang mungkin menjadi penyebab: resi pos ganjil, piutang panjar belum masuk fisik, selisih meterai/PNBP/redaksi, atau bon dinas)
+1. 📋 **Ringkasan Status Keuangan & Logika Debet SKUM** (Jelaskan secara eksplisit perbedaan antara Penerimaan Panjar Awal Perkara Masuk murni Rp ${(Number(totalDebetPanjarPerkara || totalDebet) || 0).toLocaleString('id-ID')} vs Total Mutasi Debet Buku Rp ${(Number(totalDebet) || 0).toLocaleString('id-ID')} yang ketambahan pengembalian pinjaman Rp ${(Number(totalDebetPengembalianPinjaman) || 0).toLocaleString('id-ID')})
+2. 🔍 **Diagnostik & Identifikasi Akar Penyebab Selisih Kasir** (Berdasarkan angka selisih Rp ${(Number(selisih) || 0).toLocaleString('id-ID')}, analisis transaksi: uang fisik kasir vs sisa panjar perkara + titipan kas belum disetor)
 3. ⚠️ **Faktor Risiko & Kepatuhan Tata Kelola SKUM**
 4. 💡 **Rekomendasi Tindakan Koreksi Kongkret untuk Kasir / Panitera**
 

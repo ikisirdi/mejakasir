@@ -665,8 +665,18 @@ export class SyncService {
               createdAt: String(p.createdAt || new Date().toISOString())
             };
           });
-        } else if (mappedJurnal.length > 0) {
-          mappedPinjaman = SyncService.reconstructPinjamanFromJurnal(mappedJurnal);
+        }
+        if (mappedJurnal.length > 0) {
+          const reconstructed = SyncService.reconstructPinjamanFromJurnal(mappedJurnal);
+          if (reconstructed.length > 0) {
+            const existingKeys = new Set(mappedPinjaman.map(p => `${p.tanggal}-${p.jumlah}-${(p.peminjam||'').toLowerCase()}`));
+            reconstructed.forEach(r => {
+              const key = `${r.tanggal}-${r.jumlah}-${(r.peminjam||'').toLowerCase()}`;
+              if (!existingKeys.has(key)) {
+                mappedPinjaman.push(r);
+              }
+            });
+          }
         }
 
         let mappedKasOpname: KasOpnameData | undefined = undefined;
@@ -749,9 +759,18 @@ export class SyncService {
       let pinjamanSkum = pinjamCsv ? this.parsePinjamanSaldoCsv(pinjamCsv) : [];
       let kasOpname = kasOpnameCsv ? this.parseKasOpnameCsv(kasOpnameCsv) : undefined;
 
-      // If PinjamanSaldo sheet was empty, reconstruct loans from Jurnal SKUM
-      if (pinjamanSkum.length === 0 && jurnalSkum.length > 0) {
-        pinjamanSkum = this.reconstructPinjamanFromJurnal(jurnalSkum);
+      // Merge loans from Jurnal SKUM as well
+      if (jurnalSkum.length > 0) {
+        const reconstructed = this.reconstructPinjamanFromJurnal(jurnalSkum);
+        if (reconstructed.length > 0) {
+          const existingKeys = new Set(pinjamanSkum.map(p => `${p.tanggal}-${p.jumlah}-${(p.peminjam||'').toLowerCase()}`));
+          reconstructed.forEach(r => {
+            const key = `${r.tanggal}-${r.jumlah}-${(r.peminjam||'').toLowerCase()}`;
+            if (!existingKeys.has(key)) {
+              pinjamanSkum.push(r);
+            }
+          });
+        }
       }
 
       if (cases.length > 0 || jurnalSkum.length > 0 || biayaProses.length > 0 || kasOpname) {
