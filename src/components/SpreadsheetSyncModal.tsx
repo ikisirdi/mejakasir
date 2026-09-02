@@ -246,33 +246,95 @@ function doGet(e) {
       var rowP = dataPinjamRows[p];
       if (rowP[0] && String(rowP[0]).trim() !== '') {
         if (isPinjamanSaldo) {
-          var rawStatus = String(rowP[5] || 'BELUM_DIBAYAR').toLowerCase();
-          var isLunas = rawStatus.indexOf('lunas') !== -1 || rawStatus.indexOf('sudah') !== -1;
+          var rawStatus = String(rowP[5] || 'BELUM_DIBAYAR').toLowerCase().trim();
+          var isLunas = (rawStatus.indexOf('lunas') !== -1 || rawStatus.indexOf('sudah') !== -1 || rawStatus.indexOf('paid') !== -1) && rawStatus.indexOf('belum') === -1;
+          var nomorPerkaraVal = 'Kepaniteraan Umum';
+          var ketVal = String(rowP[4] || '');
+          var peminjamVal = String(rowP[2] || 'Kepaniteraan');
+          var matchPerk = (ketVal + ' ' + peminjamVal).match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
+          if (matchPerk && matchPerk[1]) {
+            nomorPerkaraVal = matchPerk[1];
+          }
           pinjamanSkum.push({
             id: String(rowP[0]),
-            tanggal: rowP[1] ? Utilities.formatDate(new Date(rowP[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
-            nomorPerkara: 'Kepaniteraan Umum',
-            peminjam: String(rowP[2] || 'Kepaniteraan'),
+            tanggal: rowP[1] ? (rowP[1] instanceof Date ? Utilities.formatDate(rowP[1], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(rowP[1]).split('T')[0]) : '',
+            nomorPerkara: nomorPerkaraVal,
+            peminjam: peminjamVal,
             jumlah: Number(rowP[3]) || 0,
-            keterangan: String(rowP[4] || ''),
+            keterangan: ketVal,
             status: isLunas ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
             statusLunas: isLunas ? 'Lunas' : 'Belum Lunas',
-            tanggalBayar: rowP[6] ? Utilities.formatDate(new Date(rowP[6]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : undefined,
+            tanggalBayar: rowP[6] ? (rowP[6] instanceof Date ? Utilities.formatDate(rowP[6], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(rowP[6]).split('T')[0]) : undefined,
             createdAt: String(rowP[7] || '')
           });
         } else {
+          var rawStatus = String(rowP[6] || 'BELUM_DIBAYAR').toLowerCase().trim();
+          var isLunas = (rawStatus.indexOf('lunas') !== -1 || rawStatus.indexOf('sudah') !== -1 || rawStatus.indexOf('paid') !== -1) && rawStatus.indexOf('belum') === -1;
           pinjamanSkum.push({
             id: String(rowP[0]),
-            tanggal: rowP[1] ? Utilities.formatDate(new Date(rowP[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
+            tanggal: rowP[1] ? (rowP[1] instanceof Date ? Utilities.formatDate(rowP[1], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(rowP[1]).split('T')[0]) : '',
             nomorPerkara: String(rowP[2] || 'Kepaniteraan Umum'),
             peminjam: String(rowP[3] || ''),
             jumlah: Number(rowP[4]) || 0,
             keterangan: String(rowP[5] || ''),
-            status: String(rowP[6] || 'BELUM_DIBAYAR'),
-            tanggalBayar: rowP[7] ? Utilities.formatDate(new Date(rowP[7]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : undefined,
+            status: isLunas ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
+            tanggalBayar: rowP[7] ? (rowP[7] instanceof Date ? Utilities.formatDate(rowP[7], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(rowP[7]).split('T')[0]) : undefined,
             skumPengeluaranId: rowP[8] ? String(rowP[8]) : undefined,
             skumPengembalianId: rowP[9] ? String(rowP[9]) : undefined,
             createdAt: String(rowP[10] || '')
+          });
+        }
+      }
+    }
+  }
+
+  // Rekonstruksi & gabungkan pinjaman dari JurnalBiayaSKUM jika belum ada di tab PinjamanSaldo
+  if (jurnalSkum.length > 0) {
+    for (var js = 0; js < jurnalSkum.length; js++) {
+      var rJ = jurnalSkum[js];
+      var uL = String(rJ.uraian || '').toLowerCase();
+      var kL = String(rJ.kategori || '').toLowerCase();
+      var ketL = String(rJ.keterangan || '').toLowerCase();
+      var idL = String(rJ.id || '').toLowerCase();
+      var isLoanExp = idL.indexOf('pinjam') !== -1 || kL.indexOf('pinjam') !== -1 || uL.indexOf('pinjam') !== -1 || uL.indexOf('kasbon') !== -1 || uL.indexOf('bon ') !== -1 || uL.indexOf('talangan') !== -1 || ketL.indexOf('pinjam') !== -1;
+      var isLoanRep = uL.indexOf('pengembalian') !== -1 || uL.indexOf('pelunasan') !== -1 || uL.indexOf('kembali') !== -1 || uL.indexOf('lunas') !== -1 || ketL.indexOf('pelunasan') !== -1;
+      if (isLoanExp && !isLoanRep && (Number(rJ.pengeluaran) || 0) > 0) {
+        var pAmount = Number(rJ.pengeluaran) || 0;
+        var peminjamN = 'Kepaniteraan';
+        if (rJ.uraian.indexOf(':') !== -1) {
+          peminjamN = rJ.uraian.split(':')[1].split('(')[0].trim();
+        } else if (rJ.keterangan && rJ.keterangan.indexOf('(') !== -1) {
+          peminjamN = rJ.keterangan.split('(')[1].split(')')[0].trim();
+        }
+        
+        var alreadyInPinjam = false;
+        for (var ep = 0; ep < pinjamanSkum.length; ep++) {
+          var pItem = pinjamanSkum[ep];
+          if (pItem.id === rJ.id || 
+              (pItem.id && rJ.id && pItem.id.replace(/[^0-9]/g, '') === rJ.id.replace(/[^0-9]/g, '')) ||
+              (pItem.jumlah === pAmount && (pItem.tanggal === rJ.tanggal || String(pItem.peminjam || '').toLowerCase() === peminjamN.toLowerCase()))) {
+            alreadyInPinjam = true;
+            break;
+          }
+        }
+        
+        if (!alreadyInPinjam) {
+          var noPerk = rJ.nomorPerkara || 'Kepaniteraan Umum';
+          if (noPerk === 'Kepaniteraan Umum' || noPerk === '-') {
+            var mCase = (rJ.keterangan || rJ.uraian || '').match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
+            if (mCase && mCase[1]) noPerk = mCase[1];
+          }
+          pinjamanSkum.push({
+            id: 'pinjam-' + String(rJ.id).replace(/[^a-zA-Z0-9]/g, ''),
+            tanggal: rJ.tanggal,
+            nomorPerkara: noPerk,
+            peminjam: peminjamN || 'Kepaniteraan',
+            jumlah: pAmount,
+            keterangan: rJ.keterangan || rJ.uraian || 'Peminjaman Saldo SKUM',
+            status: 'BELUM_DIBAYAR',
+            statusLunas: 'Belum Lunas',
+            skumPengeluaranId: rJ.id,
+            createdAt: rJ.createdAt || new Date().toISOString()
           });
         }
       }
@@ -359,47 +421,99 @@ function doPost(e) {
     var record = payload;
 
     if (action === 'add_case' || action === 'update_case') {
-      var sheet = ss.getSheetByName('DataPerkara');
+      var sheet = ss.getSheetByName('DataPerkara') || ss.getSheetByName('Perkara') || ss.getSheetByName('SaldoPerkara') || ss.getSheetByName('Saldo Perkara') || ss.getSheetByName('Data Perkara') || ss.getSheets()[0];
+      if (!sheet) {
+        sheet = ss.insertSheet('DataPerkara');
+        sheet.appendRow([
+          'ID', 'Nomor Perkara', 'Nama Pihak', 'Jenis Perkara', 'Kategori Perkara',
+          'Panjar Awal', 'Pengeluaran', 'Saldo Perkara', 'Tanggal Register', 'Catatan', 'Updated At'
+        ]);
+        sheet.getRange('A1:K1').setFontWeight('bold').setBackground('#d1fae5');
+      }
+
       var dataRows = sheet.getDataRange().getValues();
       var rowIndex = -1;
       
       var targetId = String(record.id || '').trim();
       var targetNomor = String(record.nomorPerkara || '').trim().toLowerCase();
+      var cleanTargetNomor = targetNomor.replace(/[^a-z0-9]/g, '');
+
+      var headers = dataRows.length > 0 ? dataRows[0].map(function(h) { return String(h || '').toLowerCase().trim(); }) : [];
+      var hasIdCol = headers.length > 0 && (headers[0] === 'id' || headers[0].indexOf('id') !== -1);
+      var noPerkColIdx = -1;
+      for (var h = 0; h < headers.length; h++) {
+        if (headers[h].indexOf('nomor') !== -1 || headers[h].indexOf('perkara') !== -1 || headers[h] === 'no') {
+          noPerkColIdx = h;
+          break;
+        }
+      }
+      if (noPerkColIdx === -1) noPerkColIdx = hasIdCol ? 1 : 0;
 
       for (var i = 1; i < dataRows.length; i++) {
         var rowId = String(dataRows[i][0] || '').trim();
-        var rowNomor = String(dataRows[i][1] || '').trim().toLowerCase();
-        if ((targetId && rowId === targetId) || (targetNomor && rowNomor === targetNomor)) {
+        var rowNomor = String(dataRows[i][noPerkColIdx] || dataRows[i][1] || dataRows[i][0] || '').trim().toLowerCase();
+        var cleanRowNomor = rowNomor.replace(/[^a-z0-9]/g, '');
+        if ((targetId && rowId === targetId) || 
+            (targetNomor && rowNomor === targetNomor) || 
+            (cleanTargetNomor && cleanRowNomor && cleanTargetNomor === cleanRowNomor)) {
           rowIndex = i + 1;
           break;
         }
       }
 
-      var rowValues = [
-        record.id || ('case-' + Date.now()),
-        record.nomorPerkara || '',
-        record.namaPihak || '',
-        record.jenisPerkara || 'Cerai Gugat',
-        record.kategoriPerkara || 'Gugatan',
-        Number(record.panjarAwal) || 0,
-        Number(record.pengeluaran) || 0,
-        Number(record.saldoPerkara) || 0,
-        record.tanggalRegister || '',
-        record.catatan || '',
-        record.updatedAt || new Date().toISOString()
-      ];
+      var saldoColIdx = -1, panjarColIdx = -1, pengeluaranColIdx = -1;
+      for (var c = 0; c < headers.length; c++) {
+        if (headers[c].indexOf('saldo') !== -1 || headers[c].indexOf('sisa') !== -1) saldoColIdx = c + 1;
+        if (headers[c].indexOf('panjar') !== -1 || headers[c].indexOf('penerimaan') !== -1) panjarColIdx = c + 1;
+        if (headers[c].indexOf('pengeluaran') !== -1 || headers[c].indexOf('biaya') !== -1) pengeluaranColIdx = c + 1;
+      }
 
-      if (rowIndex > 1) {
-        sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+      if (rowIndex > 1 && saldoColIdx > 0 && panjarColIdx > 0 && pengeluaranColIdx > 0) {
+        sheet.getRange(rowIndex, panjarColIdx).setValue(Number(record.panjarAwal) || 0);
+        sheet.getRange(rowIndex, pengeluaranColIdx).setValue(Number(record.pengeluaran) || 0);
+        sheet.getRange(rowIndex, saldoColIdx).setValue(Number(record.saldoPerkara) || 0);
       } else {
-        sheet.appendRow(rowValues);
+        var rowValues = hasIdCol ? [
+          record.id || ('case-' + Date.now()),
+          record.nomorPerkara || '',
+          record.namaPihak || '',
+          record.jenisPerkara || 'Cerai Gugat',
+          record.kategoriPerkara || 'Gugatan',
+          Number(record.panjarAwal) || 0,
+          Number(record.pengeluaran) || 0,
+          Number(record.saldoPerkara) || 0,
+          record.tanggalRegister || '',
+          record.catatan || '',
+          record.updatedAt || new Date().toISOString()
+        ] : [
+          record.nomorPerkara || '',
+          record.namaPihak || '',
+          record.jenisPerkara || 'Cerai Gugat',
+          record.kategoriPerkara || 'Gugatan',
+          Number(record.panjarAwal) || 0,
+          Number(record.pengeluaran) || 0,
+          Number(record.saldoPerkara) || 0,
+          record.tanggalRegister || '',
+          record.catatan || '',
+          record.updatedAt || new Date().toISOString()
+        ];
+
+        if (rowIndex > 1) {
+          sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+        } else {
+          sheet.appendRow(rowValues);
+        }
       }
     } else if (action === 'delete_case') {
-      var sheet = ss.getSheetByName('DataPerkara');
+      var sheet = ss.getSheetByName('DataPerkara') || ss.getSheetByName('Perkara') || ss.getSheetByName('SaldoPerkara') || ss.getSheetByName('Saldo Perkara');
       if (sheet) {
         var dataRows = sheet.getDataRange().getValues();
+        var targetId = String(record.id || '').trim();
+        var targetNomor = String(record.nomorPerkara || '').trim().toLowerCase();
         for (var i = 1; i < dataRows.length; i++) {
-          if (String(dataRows[i][0]) === String(record.id) || String(dataRows[i][1]) === String(record.nomorPerkara)) {
+          var rowId = String(dataRows[i][0] || '').trim();
+          var rowNomor = String(dataRows[i][1] || dataRows[i][0] || '').trim().toLowerCase();
+          if ((targetId && rowId === targetId) || (targetNomor && rowNomor === targetNomor)) {
             sheet.deleteRow(i + 1);
             break;
           }
@@ -532,9 +646,18 @@ function doPost(e) {
       }
 
       var isPinjamanSaldo = sheet.getName() === 'PinjamanSaldo';
+      var rawStatusInput = String(record.statusLunas || record.status || '').toLowerCase().trim();
+      var isLunas = record.status === 'SUDAH_DIBAYAR' || 
+                    (rawStatusInput.indexOf('lunas') !== -1 && rawStatusInput.indexOf('belum') === -1) ||
+                    (rawStatusInput.indexOf('sudah') !== -1 && rawStatusInput.indexOf('belum') === -1) ||
+                    (rawStatusInput.indexOf('paid') !== -1 && rawStatusInput.indexOf('unpaid') === -1);
+      
+      if (record.status === 'BELUM_DIBAYAR' || rawStatusInput.indexOf('belum') !== -1 || rawStatusInput.indexOf('unpaid') !== -1) {
+        isLunas = false;
+      }
+
       var rowValues;
       if (isPinjamanSaldo) {
-        var isLunas = record.status === 'SUDAH_DIBAYAR' || String(record.statusLunas || '').toLowerCase().indexOf('lunas') !== -1;
         rowValues = [
           record.id || ('pinjam-' + Date.now()),
           record.tanggal || '',
@@ -542,7 +665,7 @@ function doPost(e) {
           Number(record.jumlah || record.jumlahRp) || 0,
           record.keterangan || 'Peminjaman Saldo SKUM',
           isLunas ? 'Lunas' : 'Belum Lunas',
-          record.tanggalBayar || record.tanggalLunas || '',
+          isLunas ? (record.tanggalBayar || record.tanggalLunas || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')) : '',
           record.createdAt || new Date().toISOString()
         ];
       } else {
@@ -553,8 +676,8 @@ function doPost(e) {
           record.peminjam || '',
           Number(record.jumlah) || 0,
           record.keterangan || '',
-          record.status || 'BELUM_DIBAYAR',
-          record.tanggalBayar || '',
+          isLunas ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
+          isLunas ? (record.tanggalBayar || record.tanggalLunas || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')) : '',
           record.skumPengeluaranId || '',
           record.skumPengembalianId || '',
           record.createdAt || new Date().toISOString()
@@ -564,13 +687,28 @@ function doPost(e) {
       var dataRows = sheet.getDataRange().getValues();
       var rowIndex = -1;
       var targetId = String(record.id || '').trim();
+      var targetPeminjam = String(record.peminjam || '').trim().toLowerCase();
+      var targetJumlah = Number(record.jumlah || record.jumlahRp) || 0;
+      var targetKet = String(record.keterangan || '').trim().toLowerCase();
 
       if (dataRows.length > 1) {
         for (var p = 1; p < dataRows.length; p++) {
           var rowId = String(dataRows[p][0] || '').trim();
-          if (targetId && rowId === targetId) {
+          var rowPeminjam = isPinjamanSaldo ? String(dataRows[p][2] || '').trim().toLowerCase() : String(dataRows[p][3] || '').trim().toLowerCase();
+          var rowJumlah = isPinjamanSaldo ? Number(dataRows[p][3]) || 0 : Number(dataRows[p][4]) || 0;
+          var rowKet = isPinjamanSaldo ? String(dataRows[p][4] || '').trim().toLowerCase() : String(dataRows[p][5] || '').trim().toLowerCase();
+          
+          if (targetId && (rowId === targetId || (rowId.replace(/[^0-9]/g, '') && targetId.replace(/[^0-9]/g, '') && rowId.replace(/[^0-9]/g, '') === targetId.replace(/[^0-9]/g, '')))) {
             rowIndex = p + 1;
             break;
+          }
+          if (targetJumlah > 0 && Math.abs(rowJumlah - targetJumlah) < 1) {
+            if ((targetPeminjam && (rowPeminjam.indexOf(targetPeminjam) !== -1 || targetPeminjam.indexOf(rowPeminjam) !== -1)) ||
+                (targetKet && (rowKet.indexOf(targetKet) !== -1 || targetKet.indexOf(rowKet) !== -1)) ||
+                (targetPeminjam && (rowKet.indexOf(targetPeminjam) !== -1 || targetPeminjam.indexOf(rowKet) !== -1))) {
+              rowIndex = p + 1;
+              break;
+            }
           }
         }
       }
@@ -699,21 +837,52 @@ function writeJurnalSkumToSheet(ss, records) {
 }
 
 function writePinjamanSkumToSheet(ss, records) {
-  var sheet = ss.getSheetByName('PinjamanSKUM');
-  if (!sheet) return;
+  var sheet = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM') || ss.getSheetByName('Pinjaman');
+  if (!sheet) {
+    sheet = ss.insertSheet('PinjamanSaldo');
+  }
   sheet.clearContents();
-  sheet.appendRow([
-    'ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah',
-    'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At'
-  ]);
-  sheet.getRange('A1:K1').setFontWeight('bold').setBackground('#fde68a');
-  records.forEach(function(r) {
+
+  var isPinjamanSaldo = (sheet.getName() === 'PinjamanSaldo');
+  if (isPinjamanSaldo) {
     sheet.appendRow([
-      r.id, r.tanggal, r.nomorPerkara, r.peminjam, r.jumlah || 0,
-      r.keterangan || '', r.status || 'BELUM_DIBAYAR', r.tanggalBayar || '',
-      r.skumPengeluaranId || '', r.skumPengembalianId || '', r.createdAt || ''
+      'ID', 'Tanggal', 'Peminjam', 'Jumlah (Rp)', 'Keterangan', 'Status Lunas', 'Tanggal Lunas', 'Created At'
     ]);
-  });
+    sheet.getRange('A1:H1').setFontWeight('bold').setBackground('#fed7aa');
+    records.forEach(function(r) {
+      var rawStatusR = String(r.statusLunas || r.status || '').toLowerCase().trim();
+      var isLunas = r.status === 'SUDAH_DIBAYAR' || 
+                    (rawStatusR.indexOf('lunas') !== -1 && rawStatusR.indexOf('belum') === -1) ||
+                    (rawStatusR.indexOf('sudah') !== -1 && rawStatusR.indexOf('belum') === -1) ||
+                    (rawStatusR.indexOf('paid') !== -1 && rawStatusR.indexOf('unpaid') === -1);
+      if (r.status === 'BELUM_DIBAYAR' || rawStatusR.indexOf('belum') !== -1 || rawStatusR.indexOf('unpaid') !== -1) {
+        isLunas = false;
+      }
+      sheet.appendRow([
+        r.id || ('pinjam-' + Date.now()),
+        r.tanggal || '',
+        r.peminjam || 'Kepaniteraan',
+        Number(r.jumlah || r.jumlahRp) || 0,
+        r.keterangan || 'Peminjaman Saldo SKUM',
+        isLunas ? 'Lunas' : 'Belum Lunas',
+        isLunas ? (r.tanggalBayar || r.tanggalLunas || '') : '',
+        r.createdAt || new Date().toISOString()
+      ]);
+    });
+  } else {
+    sheet.appendRow([
+      'ID', 'Tanggal', 'Nomor Perkara', 'Peminjam', 'Jumlah',
+      'Keterangan', 'Status', 'Tanggal Bayar', 'SKUM Pengeluaran ID', 'SKUM Pengembalian ID', 'Created At'
+    ]);
+    sheet.getRange('A1:K1').setFontWeight('bold').setBackground('#fde68a');
+    records.forEach(function(r) {
+      sheet.appendRow([
+        r.id, r.tanggal, r.nomorPerkara || 'Kepaniteraan Umum', r.peminjam || 'Kepaniteraan', r.jumlah || 0,
+        r.keterangan || '', r.status || 'BELUM_DIBAYAR', r.tanggalBayar || '',
+        r.skumPengeluaranId || '', r.skumPengembalianId || '', r.createdAt || ''
+      ]);
+    });
+  }
 }
 
 function writeKasOpnameToSheet(ss, record) {

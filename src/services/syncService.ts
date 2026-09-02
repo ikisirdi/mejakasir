@@ -3,6 +3,99 @@ import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecor
 export const DEFAULT_SPREADSHEET_ID = '11YqzoHesVzx3jn_Fw_x76cs7xqpwzqazd6YP4RO5nBw';
 
 export class SyncService {
+  /**
+   * Helper to determine if a record represents a loan expense (pengeluaran pinjaman)
+   */
+  static isPinjamanExpense(uraian: string = '', kategori: string = '', keterangan: string = '', id: string = ''): boolean {
+    const u = (uraian || '').toLowerCase();
+    const kat = (kategori || '').toLowerCase();
+    const ket = (keterangan || '').toLowerCase();
+    const idLower = (id || '').toLowerCase();
+
+    // If it is a repayment (Debet / Penerimaan), it is not a loan disbursement
+    if (SyncService.isPinjamanRepayment(uraian, kategori, keterangan)) {
+      return false;
+    }
+
+    // Explicit ID tag or Pinjaman category
+    if (idLower.startsWith('skum-pinjam') || idLower.startsWith('pinjam-') || kat === 'pinjaman' || kat.includes('pinjam')) {
+      return true;
+    }
+
+    // Explicit loan keywords in uraian or keterangan
+    if (
+      u.includes('peminjaman saldo') ||
+      u.includes('pinjaman saldo') ||
+      u.includes('peminjaman skum') ||
+      u.includes('pinjaman skum') ||
+      u.includes('kasbon') ||
+      u.includes('bon kasir') ||
+      u.includes('bon sementara') ||
+      u.includes('bon operasional') ||
+      u.includes('talangan') ||
+      u.includes('dipinjam') ||
+      ket.includes('peminjaman saldo') ||
+      ket.includes('pinjaman saldo') ||
+      ket.includes('peminjaman skum')
+    ) {
+      return true;
+    }
+
+    // Non-loan panjar entries (e.g. standard panjar deposits)
+    if (u.includes('tambah panjar') || u.includes('panjar awal') || u.includes('setoran panjar') || u.includes('penerimaan panjar')) {
+      return false;
+    }
+
+    return u.includes('peminjaman') || u.includes('pinjam') || ket.includes('peminjaman') || ket.includes('pinjam');
+  }
+
+  /**
+   * Helper to determine if a record represents a loan repayment (penerimaan pengembalian pinjaman)
+   */
+  static isPinjamanRepayment(uraian: string = '', kategori: string = '', keterangan: string = ''): boolean {
+    const u = (uraian || '').toLowerCase();
+    const kat = (kategori || '').toLowerCase();
+    const ket = (keterangan || '').toLowerCase();
+
+    return u.includes('pengembalian pinjaman') ||
+           u.includes('pelunasan pinjaman') ||
+           u.includes('pengembalian saldo') ||
+           u.includes('kembali pinjaman') ||
+           u.includes('lunas pinjaman') ||
+           u.includes('bayar pinjaman') ||
+           u.includes('setor pinjaman') ||
+           u.includes('pengembalian bon') ||
+           u.includes('pelunasan bon') ||
+           u.includes('pengembalian kasbon') ||
+           u.includes('pelunasan kasbon') ||
+           ket.includes('pelunasan pinjaman') ||
+           ket.includes('pengembalian pinjaman') ||
+           (kat.includes('pinjam') && (u.includes('kembali') || u.includes('lunas') || u.includes('setor') || u.includes('pengembalian')));
+  }
+
+  /**
+   * Helper to extract borrower name / loan purpose from description
+   */
+  static extractBorrowerName(uraian: string = '', keterangan: string = ''): string {
+    const raw = uraian || keterangan || '';
+    if (raw.includes(':')) {
+      const parts = raw.split(':');
+      const name = parts.slice(1).join(':').split('(')[0].split('[')[0].trim();
+      if (name.length > 0) return name;
+    }
+    const cleaned = raw
+      .replace(/\[WARNA:[^\]]+\]/gi, '')
+      .replace(/^(peminjaman|pinjaman|pinjam|kasbon|bon|talangan)(\s+saldo(\s+skum)?)?/i, '')
+      .replace(/^(oleh|untuk|uang|sebesar|kepaniteraan|operasional)\s+/i, '')
+      .replace(/rp\.?\s*[\d.,]+/i, '')
+      .replace(/\(.*?\)/g, '')
+      .trim();
+
+    if (cleaned.length >= 2 && !cleaned.toLowerCase().includes('kepaniteraan umum')) {
+      return cleaned;
+    }
+    return 'Kepaniteraan';
+  }
 
   /**
    * Helper to extract Google Spreadsheet ID from any URL
@@ -15,43 +108,70 @@ export class SyncService {
   }
 
   /**
-   * Reconstruct PinjamanSkumRecord items from JurnalBiayaSkum records if sheet is legacy
+   * Reconstruct PinjamanSkumRecord items from JurnalBiayaSkum records if sheet is legacy or missing
    */
   static reconstructPinjamanFromJurnal(jurnalRecords: JurnalBiayaSkumRecord[]): PinjamanSkumRecord[] {
     const pinjamMap = new Map<string, PinjamanSkumRecord>();
-    const returnNames = new Set<string>();
+    const returnMap = new Map<string, { tanggal: string; id: string }>();
+    const returnAmountSet = new Map<number, { tanggal: string; id: string }>();
 
-    // First find repayments
+    // 1. Collect all repayments (Debet / Penerimaan)
     jurnalRecords.forEach(j => {
-      const uraianLower = (j.uraian || '').toLowerCase();
-      if (uraianLower.includes('pengembalian pinjaman') || uraianLower.includes('pelunasan pinjaman') || uraianLower.includes('pengembalian saldo skum')) {
-        const namePart = (j.uraian || '').split(':').slice(1).join(':').trim();
-        if (namePart) returnNames.add(namePart.toLowerCase());
+      const pen = Number(j.penerimaan) || 0;
+      if (pen <= 0) return;
+
+      const isRepay = SyncService.isPinjamanRepayment(j.uraian, j.kategori, j.keterangan);
+      if (isRepay) {
+        const borrower = SyncService.extractBorrowerName(j.uraian, j.keterangan).toLowerCase();
+        if (borrower) {
+          returnMap.set(borrower, { tanggal: j.tanggal, id: j.id });
+        }
+        returnAmountSet.set(pen, { tanggal: j.tanggal, id: j.id });
       }
     });
 
-    // Then find loans
+    // 2. Identify all loan disbursements (Kredit / Pengeluaran)
     jurnalRecords.forEach(j => {
-      const uraianLower = (j.uraian || '').toLowerCase();
-      const isPinjam = j.kategori === 'Pinjaman' || 
-                       uraianLower.includes('peminjaman saldo') || 
-                       uraianLower.includes('pinjam saldo');
+      const peng = Number(j.pengeluaran) || 0;
+      if (peng <= 0) return;
 
-      if (isPinjam && (Number(j.pengeluaran) || 0) > 0) {
-        const namePart = (j.uraian || '').split(':').slice(1).join(':').trim() || 'Kepaniteraan';
-        const isPaid = returnNames.has(namePart.toLowerCase());
+      const isLoan = SyncService.isPinjamanExpense(j.uraian, j.kategori, j.keterangan, j.id);
+
+      if (isLoan) {
+        const borrower = SyncService.extractBorrowerName(j.uraian, j.keterangan);
+        const borrowerLower = borrower.toLowerCase();
+
+        // Check if there is a matching repayment by name or by exact amount
+        const returnInfo = returnMap.get(borrowerLower) || returnAmountSet.get(peng);
+        const isPaid = !!returnInfo;
         
+        let cleanKet = (j.keterangan || j.uraian || 'Peminjaman Saldo SKUM')
+          .replace(/\[WARNA:[^\]]+\]/gi, '')
+          .trim();
+
+        // Extract case number if embedded in text (e.g. Perkara 2/Pdt.G/2026/PA.Pan)
+        let nomorPerkara = j.nomorPerkara || 'Kepaniteraan Umum';
+        if (nomorPerkara === 'Kepaniteraan Umum' || nomorPerkara === '-') {
+          const matchCase = (j.keterangan || j.uraian || '').match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
+          if (matchCase && matchCase[1]) {
+            nomorPerkara = matchCase[1];
+          }
+        }
+
+        const pinjamId = j.id.startsWith('pinjam-') ? j.id : `pinjam-${j.id.replace(/[^a-zA-Z0-9]/g, '')}`;
+
         pinjamMap.set(j.id, {
-          id: `pinjam-${j.id.replace(/[^a-zA-Z0-9]/g, '')}`,
+          id: pinjamId,
           tanggal: j.tanggal,
-          nomorPerkara: j.nomorPerkara || 'Kepaniteraan Umum',
-          peminjam: namePart,
-          jumlah: Number(j.pengeluaran) || 0,
-          keterangan: j.keterangan || 'Peminjaman Saldo SKUM Kepaniteraan',
+          nomorPerkara: nomorPerkara,
+          peminjam: borrower || 'Kepaniteraan',
+          jumlah: peng,
+          keterangan: cleanKet,
           status: isPaid ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
-          tanggalBayar: isPaid ? j.tanggal : undefined,
-          createdAt: j.createdAt || new Date().toISOString(),
-          skumPengeluaranId: j.id
+          tanggalBayar: returnInfo ? returnInfo.tanggal : undefined,
+          skumPengeluaranId: j.id,
+          skumPengembalianId: returnInfo ? returnInfo.id : undefined,
+          createdAt: j.createdAt || new Date().toISOString()
         });
       }
     });
@@ -310,6 +430,7 @@ export class SyncService {
 
     const idIdx = getIdx('id');
     const tglIdx = getIdx('tanggal', 'tgl pinjam', 'tgl');
+    const noPerkaraIdx = getIdx('nomor perkara', 'no perkara', 'perkara', 'sumber skum', 'sumber');
     const peminjamIdx = getIdx('peminjam', 'nama peminjam', 'nama');
     const jumlahIdx = getIdx('jumlah (rp)', 'jumlah', 'nominal');
     const ketIdx = getIdx('keterangan', 'alasan', 'catatan');
@@ -333,13 +454,15 @@ export class SyncService {
       const rawJumlah = jumlahIdx !== -1 ? cleanMoney(cols[jumlahIdx]) : 0;
       if (rawJumlah <= 0 && (!cols[peminjamIdx] || cols[peminjamIdx].trim() === '')) continue;
 
-      const rawStatus = statusIdx !== -1 ? String(cols[statusIdx] || '').toLowerCase() : '';
-      const isLunas = rawStatus.includes('lunas') || rawStatus.includes('sudah') || rawStatus === 'sudah_dibayar';
+      const rawStatus = statusIdx !== -1 ? String(cols[statusIdx] || '').toLowerCase().trim() : '';
+      const isLunas = (rawStatus === 'sudah_dibayar' || rawStatus === 'lunas' || rawStatus === 'sudah lunas' || rawStatus === 'paid' || 
+                      (rawStatus.includes('lunas') || rawStatus.includes('sudah') || rawStatus.includes('paid'))) && 
+                      !rawStatus.includes('belum') && !rawStatus.includes('unpaid') && !rawStatus.includes('tidak');
 
       records.push({
         id: idIdx !== -1 && cols[idIdx] ? cols[idIdx] : `pinjam-${Date.now()}-${i}`,
         tanggal: tglIdx !== -1 && cols[tglIdx] ? cols[tglIdx] : new Date().toISOString().split('T')[0],
-        nomorPerkara: 'Kepaniteraan Umum',
+        nomorPerkara: (noPerkaraIdx !== -1 && cols[noPerkaraIdx] && cols[noPerkaraIdx].trim()) ? cols[noPerkaraIdx].trim() : 'Kepaniteraan Umum',
         peminjam: peminjamIdx !== -1 && cols[peminjamIdx] ? cols[peminjamIdx] : 'Kepaniteraan',
         jumlah: rawJumlah,
         keterangan: ketIdx !== -1 && cols[ketIdx] ? cols[ketIdx] : 'Peminjaman Saldo SKUM',
@@ -416,12 +539,11 @@ export class SyncService {
       const uraian = uraianIdx !== -1 && cols[uraianIdx] ? cols[uraianIdx] : '';
       const uraianLower = uraian.toLowerCase();
 
+      const rowId = idIdx !== -1 && cols[idIdx] ? cols[idIdx] : `skum-${Date.now()}-${i}`;
+
       // Loan and repayment detection
-      const isPengembalianPinjaman = uraianLower.includes('pengembalian pinjaman') || 
-                                     uraianLower.includes('pelunasan pinjaman') ||
-                                     uraianLower.includes('pengembalian saldo skum');
-      const isPeminjamanPinjaman = uraianLower.includes('peminjaman saldo') || 
-                                   uraianLower.includes('pinjam saldo');
+      const isPengembalianPinjaman = SyncService.isPinjamanRepayment(uraian, cols[katIdx] || '', cols[ketIdx] || '');
+      const isPeminjamanPinjaman = SyncService.isPinjamanExpense(uraian, cols[katIdx] || '', cols[ketIdx] || '', rowId);
 
       if (isPeminjamanPinjaman) {
         peng = peng > 0 ? peng : pen;
@@ -432,7 +554,7 @@ export class SyncService {
       }
 
       let kategori = katIdx !== -1 && cols[katIdx] ? cols[katIdx] : '';
-      if (!kategori || kategori === '-') {
+      if (!kategori || kategori === '-' || isPeminjamanPinjaman || isPengembalianPinjaman) {
         if (isPeminjamanPinjaman || isPengembalianPinjaman) kategori = 'Pinjaman';
         else if (pen > 0 && peng === 0) kategori = 'Panjar';
         else kategori = 'Panggilan';
@@ -578,12 +700,8 @@ export class SyncService {
           const uraianLower = String(j.uraian || '').toLowerCase();
 
           // Loan and repayment classification
-          const isPengembalianPinjaman = uraianLower.includes('pengembalian pinjaman') || 
-                                         uraianLower.includes('pelunasan pinjaman') ||
-                                         uraianLower.includes('pengembalian saldo skum');
-          const isPeminjamanPinjaman = (j.kategori === 'Pinjaman' && !isPengembalianPinjaman) ||
-                                       uraianLower.includes('peminjaman saldo') || 
-                                       uraianLower.includes('pinjam saldo');
+          const isPengembalianPinjaman = SyncService.isPinjamanRepayment(j.uraian, j.kategori, j.keterangan);
+          const isPeminjamanPinjaman = SyncService.isPinjamanExpense(j.uraian, j.kategori, j.keterangan);
 
           if (pen > 0 && peng > 0) {
             const isPanjarAwal = j.kategori === 'Panjar' || uraianLower.includes('panjar awal');
@@ -604,7 +722,7 @@ export class SyncService {
 
           const isDebet = pen > 0 && peng === 0;
           let finalKategori = j.kategori;
-          if (!finalKategori || finalKategori === 'undefined') {
+          if (!finalKategori || finalKategori === 'undefined' || isPeminjamanPinjaman || isPengembalianPinjaman) {
             if (isPeminjamanPinjaman || isPengembalianPinjaman) {
               finalKategori = 'Pinjaman';
             } else {
@@ -649,8 +767,10 @@ export class SyncService {
         let mappedPinjaman: PinjamanSkumRecord[] = [];
         if (rawPinjaman.length > 0) {
           mappedPinjaman = rawPinjaman.map((p, idx) => {
-            const rawStatus = String(p.status || p.statusLunas || 'BELUM_DIBAYAR').toLowerCase();
-            const isLunas = rawStatus.includes('lunas') || rawStatus.includes('sudah') || rawStatus === 'sudah_dibayar';
+            const rawStatus = String(p.status || p.statusLunas || 'BELUM_DIBAYAR').toLowerCase().trim();
+            const isLunas = (rawStatus === 'sudah_dibayar' || rawStatus === 'lunas' || rawStatus === 'sudah lunas' || rawStatus === 'paid' || 
+                            (rawStatus.includes('lunas') || rawStatus.includes('sudah') || rawStatus.includes('paid'))) && 
+                            !rawStatus.includes('belum') && !rawStatus.includes('unpaid') && !rawStatus.includes('tidak');
             return {
               id: String(p.id || `pinjam-${idx + 1}`),
               tanggal: String(p.tanggal || new Date().toISOString().split('T')[0]),
@@ -1032,13 +1152,16 @@ export class SyncService {
 
     let synced = 0;
     for (const p of records) {
+      const isLunas = p.status === 'SUDAH_DIBAYAR';
       const payload = {
         ...p,
         jumlahRp: p.jumlah,
-        statusLunas: p.status === 'SUDAH_DIBAYAR' ? 'Lunas' : 'Belum Lunas',
-        tanggalLunas: p.tanggalBayar || ''
+        status: isLunas ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
+        statusLunas: isLunas ? 'Lunas' : 'Belum Lunas',
+        tanggalLunas: isLunas ? (p.tanggalBayar || '') : '',
+        tanggalBayar: isLunas ? (p.tanggalBayar || '') : ''
       };
-      const success = await this.postToWebhook(webhookUrl, 'add_pinjaman_skum', payload);
+      const success = await this.postToWebhook(webhookUrl, 'update_pinjaman_skum', payload);
       if (success) synced++;
     }
 

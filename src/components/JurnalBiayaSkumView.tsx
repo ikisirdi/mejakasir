@@ -36,12 +36,9 @@ import {
   Table,
   Coins,
   Banknote,
-  Sparkles,
-  Bot,
-  BrainCircuit,
   Zap,
-  Copy,
-  Lightbulb
+  Lightbulb,
+  CloudUpload
 } from 'lucide-react';
 
 export const getEffectiveWarnaBaris = (r: { warnaBaris?: string; keterangan?: string }): 'hijau' | 'kuning' | 'merah' | 'oranye' | 'default' => {
@@ -69,6 +66,7 @@ interface JurnalBiayaSkumViewProps {
   onDeleteRecord: (id: string) => void;
   onOpenJurnalModal: () => void;
   onAddPinjaman?: (data: { tanggal: string; nomorPerkara: string; peminjam: string; jumlah: number; keterangan: string }) => void;
+  onUpdatePinjaman?: (pinjaman: PinjamanSkumRecord) => void;
   onBayarPinjaman?: (pinjamanId: string) => void;
   onDeletePinjaman?: (pinjamanId: string) => void;
   onSyncAllColorsToCloud?: () => Promise<{ success: boolean; total: number; synced: number }>;
@@ -85,6 +83,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   onDeleteRecord,
   onOpenJurnalModal,
   onAddPinjaman,
+  onUpdatePinjaman,
   onBayarPinjaman,
   onDeletePinjaman,
   onSyncAllColorsToCloud,
@@ -123,6 +122,17 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const [pinjamJumlah, setPinjamJumlah] = useState<number>(0);
   const [pinjamKeterangan, setPinjamKeterangan] = useState('');
 
+  // State Edit Pinjaman Modal
+  const [editingPinjaman, setEditingPinjaman] = useState<PinjamanSkumRecord | null>(null);
+  const [isEditPinjamanModalOpen, setIsEditPinjamanModalOpen] = useState(false);
+  const [editPinjamTanggal, setEditPinjamTanggal] = useState('');
+  const [editPinjamNomorPerkara, setEditPinjamNomorPerkara] = useState('');
+  const [editPinjamPeminjam, setEditPinjamPeminjam] = useState('');
+  const [editPinjamJumlah, setEditPinjamJumlah] = useState<number>(0);
+  const [editPinjamKeterangan, setEditPinjamKeterangan] = useState('');
+  const [editPinjamStatus, setEditPinjamStatus] = useState<'BELUM_DIBAYAR' | 'SUDAH_DIBAYAR'>('BELUM_DIBAYAR');
+  const [editPinjamTanggalBayar, setEditPinjamTanggalBayar] = useState('');
+
   // Kas Opname & Pemeriksaan Selisih Kasir (Disimpan ke LocalStorage & Cloud agar tetap persisten antar device)
   const [auditKasFisikInput, setAuditKasFisikInput] = useState<number>(() => {
     const savedOpname = StorageService.getKasOpname();
@@ -137,15 +147,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     }
     return 0;
   });
-  const [excludePanjarKurangFromCash, setExcludePanjarKurangFromCash] = useState<boolean>(true);
   const [isSyncingKasOpname, setIsSyncingKasOpname] = useState(false);
   const [kasOpnameSyncSuccess, setKasOpnameSyncSuccess] = useState(false);
-  
-  // State Asisten AI Audit Kasir (Gemini)
-  const [isAiAuditing, setIsAiAuditing] = useState(false);
-  const [aiAuditResult, setAiAuditResult] = useState<string | null>(null);
-  const [aiAuditError, setAiAuditError] = useState<string | null>(null);
-  const [aiAuditCopied, setAiAuditCopied] = useState(false);
 
   // Kalkulator Denominasi Pecahan Fisik Kasir (Kertas & Logam)
   const [denominations, setDenominations] = useState<{ [key: number]: number }>(() => {
@@ -233,6 +236,38 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     setIsDenominationOpen(false);
   };
 
+  // State sinkronisasi pinjaman ke sheet
+  const [isSyncingPinjamanToCloud, setIsSyncingPinjamanToCloud] = useState(false);
+  const [pinjamanSyncSuccessMessage, setPinjamanSyncSuccessMessage] = useState<string | null>(null);
+
+  const handlePushPinjamanToCloud = async () => {
+    const syncSettings = StorageService.getSyncSettings();
+    const url = syncSettings.googleSheetUrl;
+    if (!url) {
+      alert('Google Sheet Apps Script Webhook URL belum dikonfigurasi. Buka menu Sinkronisasi Spreadsheet.');
+      return;
+    }
+    if (pinjamanRecords.length === 0) {
+      alert('Tidak ada data pinjaman untuk disinkronkan.');
+      return;
+    }
+    setIsSyncingPinjamanToCloud(true);
+    try {
+      const res = await SyncService.pushPinjamanToSheet(url, pinjamanRecords);
+      if (res.success || res.synced > 0) {
+        setPinjamanSyncSuccessMessage(`Berhasil menyinkronkan ${res.synced} data pinjaman ke tab PinjamanSaldo!`);
+        setTimeout(() => setPinjamanSyncSuccessMessage(null), 4000);
+      } else {
+        alert('Gagal mengirim ke Google Sheet. Pastikan Google Apps Script kode.gs terbaru sudah dideploy sebagai Web App.');
+      }
+    } catch (err) {
+      console.error('Error pushing pinjaman:', err);
+      alert('Terjadi kesalahan saat menyinkronkan data pinjaman.');
+    } finally {
+      setIsSyncingPinjamanToCloud(false);
+    }
+  };
+
   // Pinjaman & Piutang state and calculation
   const [pinjamanFilterTab, setPinjamanFilterTab] = useState<'ALL' | 'BELUM_DIBAYAR' | 'SUDAH_DIBAYAR'>('ALL');
 
@@ -252,15 +287,15 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
     return paidLoans.reduce((sum, p) => sum + (p.jumlah || 0), 0);
   }, [paidLoans]);
 
-  const totalAllLoansAmount = useMemo(() => {
-    return (pinjamanRecords || []).reduce((sum, p) => sum + (p.jumlah || 0), 0);
-  }, [pinjamanRecords]);
-
   const displayedPinjamanList = useMemo(() => {
     if (pinjamanFilterTab === 'BELUM_DIBAYAR') return unpaidLoans;
     if (pinjamanFilterTab === 'SUDAH_DIBAYAR') return paidLoans;
     return pinjamanRecords || [];
   }, [pinjamanFilterTab, unpaidLoans, paidLoans, pinjamanRecords]);
+
+  const displayedTotalLoanAmount = useMemo(() => {
+    return displayedPinjamanList.reduce((sum, p) => sum + (p.jumlah || 0), 0);
+  }, [displayedPinjamanList]);
 
   // Deteksi rincian pinjaman: pinjaman kantor riil (sidkel) vs piutang kekurangan panjar pihak
   const loanBreakdown = useMemo(() => {
@@ -340,6 +375,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
         setPerkara.add(c.nomorPerkara.trim());
       }
     });
+    // Pastikan Kepaniteraan Umum selalu tersedia secara standar dan unik
+    setPerkara.add('Kepaniteraan Umum');
     return Array.from(setPerkara).sort();
   }, [records, cases]);
 
@@ -553,7 +590,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       if (isLoanRepayment) {
         totalNonPanjarDebet += pen;
         nonCaseDebets.push({
-          nomorPerkara: r.nomorPerkara || 'Kepaniteraan / Kas General',
+          nomorPerkara: r.nomorPerkara || 'Kepaniteraan Umum',
           nominal: pen,
           tanggal: r.tanggal || '-',
           uraian: r.uraian || 'Pengembalian Pinjaman Saldo SKUM',
@@ -631,25 +668,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       return net > 0 ? net : 0;
     }
 
-    let base = totalUnpaidAmount;
-    if (base === 0) {
-      const pinjamPengeluaran = filteredRecords
-        .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam')) && (r.pengeluaran || 0) > 0)
-        .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
-      const pinjamPenerimaan = filteredRecords
-        .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam') || (r.uraian || '').toLowerCase().includes('pengembalian')) && (r.penerimaan || 0) > 0)
-        .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
-      const net = pinjamPengeluaran - pinjamPenerimaan;
-      base = net > 0 ? net : 0;
+    if (totalUnpaidAmount > 0) {
+      return totalUnpaidAmount;
     }
 
-    // Jika opsi excludePanjarKurangFromCash aktif, kurangi piutang panjar belum lengkap (pihak belum setor uang)
-    if (excludePanjarKurangFromCash && loanBreakdown.panjarKurangLoans > 0) {
-      base = Math.max(0, base - loanBreakdown.panjarKurangLoans);
-    }
-
-    return base;
-  }, [totalUnpaidAmount, unpaidLoans, filterNomorPerkara, filteredRecords, excludePanjarKurangFromCash, loanBreakdown.panjarKurangLoans]);
+    const pinjamPengeluaran = filteredRecords
+      .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam')) && (r.pengeluaran || 0) > 0)
+      .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+    const pinjamPenerimaan = filteredRecords
+      .filter(r => (r.kategori === 'Pinjaman' || (r.uraian || '').toLowerCase().includes('pinjam') || (r.uraian || '').toLowerCase().includes('pengembalian')) && (r.penerimaan || 0) > 0)
+      .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
+    const net = pinjamPengeluaran - pinjamPenerimaan;
+    return net > 0 ? net : 0;
+  }, [totalUnpaidAmount, unpaidLoans, filterNomorPerkara, filteredRecords]);
 
   // Biaya Kas yang Belum Disetor (Akan Disetor) yang efektif digunakan untuk menyesuaikan Saldo Sesungguhnya
   const effectiveBiayaKasBelumDisetor = useMemo(() => {
@@ -673,7 +704,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   }, [modeKasBelumSetor, customKasBelumSetor, totalKasKuningBelumSetor, totalKreditNonHijau]);
 
   // Perhitungan Kas Standar & Sisa Panjar Murni Perkara untuk Kas Opname Kasir
-  const { totalSisaPanjarMurniPerkara, saldoFisikStandarBuku, selisihAuditKasir } = useMemo(() => {
+  const { totalSisaPanjarMurniPerkara, saldoFisikStandarBuku, uangTunaiSeharusnyaDiLaci, selisihAuditKasir } = useMemo(() => {
     // Sisa panjar murni seluruh perkara aktif (tanpa kepaniteraan)
     const perkaraMap = new Map<string, number>();
     records.forEach(r => {
@@ -689,16 +720,22 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       sisaPanjar += bal;
     });
 
-    // Standar kas fisik pembukuan = Sisa panjar perkara + Titipan biaya belum disetor (kuning)
+    // 1. Total Standar Pertanggungjawaban Buku Kasir = Sisa panjar perkara + Titipan biaya belum disetor (kuning)
     const standarFisik = sisaPanjar + effectiveBiayaKasBelumDisetor;
-    const selisih = (auditKasFisikInput || 0) - standarFisik;
+
+    // 2. Uang Tunai Murni yang Wajib Ada di Laci Meja Kasir (Standar dikurangi uang yang sedang dipinjam kasir/bon)
+    const uangTunaiWajib = Math.max(0, standarFisik - effectiveUnpaidLoanAmount);
+
+    // 3. Selisih Kas Opname terhadap uang tunai yang seharusnya di laci
+    const selisih = (auditKasFisikInput || 0) - uangTunaiWajib;
 
     return {
       totalSisaPanjarMurniPerkara: sisaPanjar,
       saldoFisikStandarBuku: standarFisik,
+      uangTunaiSeharusnyaDiLaci: uangTunaiWajib,
       selisihAuditKasir: selisih
     };
-  }, [records, effectiveBiayaKasBelumDisetor, auditKasFisikInput]);
+  }, [records, effectiveBiayaKasBelumDisetor, effectiveUnpaidLoanAmount, auditKasFisikInput]);
 
   // Saldo Sesungguhnya (Kas Riil Fisik di Kasir):
   // Rumus: Saldo Perkara SKUM + Biaya Kas Belum Disetor + Pinjaman Saldo SKUM Kepaniteraan
@@ -745,156 +782,6 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   const handleResetToStandardBook = () => {
     setModeKasBelumSetor('auto');
     handleUpdateAuditKasFisik(saldoFisikStandarBuku);
-  };
-
-  // Helper Pembuat Laporan Analisis Forensik Kasir AI (Kompilasi Standar MA RI)
-  const generateClientAiAuditReport = (data: {
-    saldoFisikKasir: number;
-    saldoStandarBuku: number;
-    selisih: number;
-    totalDebet: number;
-    totalKredit: number;
-    saldoSkum: number;
-    biayaKasBelumSetor: number;
-    pinjamanKas: number;
-    totalDebetPanjarPerkara?: number;
-    totalDebetPengembalianPinjaman?: number;
-  }) => {
-    const { saldoFisikKasir, saldoStandarBuku, selisih, totalDebet, totalKredit, saldoSkum, biayaKasBelumSetor, pinjamanKas } = data;
-    const panjarMurni = data.totalDebetPanjarPerkara || debetBreakdown.totalPanjarMurni;
-    const nonPanjar = data.totalDebetPengembalianPinjaman || debetBreakdown.totalNonPanjarDebet;
-
-    const debetExplanationSection = `
-#### 🔍 Logika Perhitungan Debet SKUM Awal:
-- **Penerimaan Panjar Awal Murni (Perkara Masuk)**: **Rp ${panjarMurni.toLocaleString('id-ID')}** (${debetBreakdown.gugatanPanjars.length} Gugatan @ Rp ${debetBreakdown.gugatanPanjars.length > 0 ? (debetBreakdown.totalGugatan / debetBreakdown.gugatanPanjars.length).toLocaleString('id-ID') : 0} + ${debetBreakdown.permohonanPanjars.length} Permohonan @ Rp ${debetBreakdown.permohonanPanjars.length > 0 ? (debetBreakdown.totalPermohonan / debetBreakdown.permohonanPanjars.length).toLocaleString('id-ID') : 0}).
-- **Pengembalian / Pelunasan Pinjaman Kasir**: **Rp ${nonPanjar.toLocaleString('id-ID')}** (Pelunasan bon materai kepaniteraan).
-- **Total Mutasi Debet Jurnal SKUM Buku**: **Rp ${totalDebet.toLocaleString('id-ID')}** (Rp ${panjarMurni.toLocaleString('id-ID')} + Rp ${nonPanjar.toLocaleString('id-ID')}).
-*(Perhitungan manual panjar awal perkara masuk menghasilkan Rp ${panjarMurni.toLocaleString('id-ID')}; selisih Rp ${nonPanjar.toLocaleString('id-ID')} adalah transaksi pengembalian pinjaman bon kas)*.`;
-
-    if (saldoFisikKasir === 0) {
-      return `### 📋 Status Kas Opname: Belum Ada Input Uang Fisik Kasir
-- **Kas Standar Pembukuan**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
-- **Uang Fisik Kasir**: Rp 0 (Belum diisi)
-${debetExplanationSection}
-
-💡 **Petunjuk & Rekomendasi:**
-1. Masukkan nominal uang riil tunai di laci meja kasir pada kolom input.
-2. Anda juga dapat menggunakan tombol **"💵 Kalkulator Pecahan Fisik"** untuk menghitung lembaran & kepingan uang kasir secara presisi.
-3. Setelah diisi, sistem dan Asisten AI akan menganalisis rekonsiliasi dan akar masalah secara otomatis.`;
-    }
-
-    if (selisih === 0) {
-      return `### 📋 Status Rekonsiliasi: 100% Tepat & Seimbang (Cocok Sempurna)
-- **Uang Fisik Aktual di Kasir**: Rp ${saldoFisikKasir.toLocaleString('id-ID')}
-- **Kas Seharusnya (Buku Standar)**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
-- **Status Selisih**: **Rp 0 (NIHIL / PAS / BALANCE)**
-${debetExplanationSection}
-
-#### 🔍 Rincian Analisis Forensik:
-1. **Sisa Panjar Perkara Aktif**: Uang fisik yang dipegang kasir mencakup seluruh sisa panjar para pihak berperkara yang tercatat di Buku Jurnal SKUM (Rp ${totalSisaPanjarMurniPerkara.toLocaleString('id-ID')}).
-2. **Biaya Kas Belum Disetor**: Mencakup titipan biaya proses / PNBP / redaksi yang belum disetorkan ke kas negara/bendahara sebesar **Rp ${biayaKasBelumSetor.toLocaleString('id-ID')}**.
-3. **Kepatuhan Administrasi**: Pembukuan Jurnal SKUM dan uang fisik berada dalam kondisi sangat sehat, tertib, dan akuntabel sesuai Petunjuk Teknis Mahkamah Agung RI.
-
-💡 **Rekomendasi Tindakan:**
-- Cetak Berita Acara Kas Opname resmi sebagai arsip pengawasan bulanan Panitera/KPA.
-- Lakukan penyetoran berkala untuk biaya kas yang belum disetor agar kas fisik di meja kasir tetap aman.`;
-    }
-
-    if (selisih > 0) {
-      return `### 📋 Status Rekonsiliasi: Surplus Kas Fisik (+Rp ${selisih.toLocaleString('id-ID')})
-- **Uang Fisik Aktual Kasir**: Rp ${saldoFisikKasir.toLocaleString('id-ID')}
-- **Kas Seharusnya (Buku Standar)**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
-- **Surplus Uang Kas**: **+ Rp ${selisih.toLocaleString('id-ID')}** (Uang riil di laci kasir LEBIH BESAR daripada buku)
-${debetExplanationSection}
-
-#### 🔍 Diagnostik Akar Masalah (Mengapa Uang Fisik Lebih?):
-1. **Penerimaan Belum Terbukukan**: Kemungkinan ada panjar tambahan, titipan sisa pihak perkara lain, atau biaya fotokopi/redaksi yang telah diserahkan tunai ke kasir namun belum terinput pada Buku Jurnal SKUM.
-2. **Selisih Pengembalian Belanja / Resi Pos**: Periksa pengeluaran pos atau delegasi yang biaya riilnya lebih kecil dari panjar yang ditarik, di mana kembaliannya tersimpan di laci kasir namun belum dibuatkan jurnal pengembalian sisa.
-3. **Pecahan Sisa Kembalian & Pembulatan**: Selisih nominal kecil (misalnya ratusan atau ribuan rupiah) lazim bersumber dari pembulatan pecahan resi kurir (Pos/ekspedisi berakhiran ganjil) atau meterai tempel.
-
-💡 **Rekomendasi Tindakan Koreksi:**
-- Lakukan kroscek bukti setor bank (Koran Kasir) dan kwitansi manual terhadap seluruh buku kasir.
-- Jika surplus merupakan titipan biaya yang sah, segera bukukan sebagai penerimaan SKUM atau titipan pihak.
-- Klik tombol **"⚡ Terapkan Aktual Kasir ke Sistem"** jika kelebihan ini merupakan titipan riil yang sah di kasir.`;
-    }
-
-    const absSelisih = Math.abs(selisih);
-    return `### 📋 Status Rekonsiliasi: Defisit Kas Fisik (-Rp ${absSelisih.toLocaleString('id-ID')})
-- **Uang Fisik Aktual Kasir**: Rp ${saldoFisikKasir.toLocaleString('id-ID')}
-- **Kas Seharusnya (Buku Standar)**: Rp ${saldoStandarBuku.toLocaleString('id-ID')}
-- **Defisit Uang Kas**: **- Rp ${absSelisih.toLocaleString('id-ID')}** (Uang riil di laci kasir KURANG dibanding buku)
-${debetExplanationSection}
-
-#### 🔍 Diagnostik Akar Masalah (Mengapa Uang Fisik Kurang?):
-1. **Pinjaman / Bon Sementara Belum Tercatat**: Ada pengeluaran operasional mendesak (seperti transport sidang keliling, materai, ATK) yang uangnya sudah diambil namun bon kasir belum dimasukkan ke sistem pinjaman. Total pinjaman kepaniteraan tercatat saat ini: **Rp ${pinjamanKas.toLocaleString('id-ID')}**.
-2. **Piutang Panjar Belum Lunas (Skul Panjar)**: Periksa apakah ada perkara yang panjar awalnya belum disetor lunas oleh pihak (uang belum masuk fisik kasir tetapi sudah tercatat debet panjar).
-3. **Pengeluaran Riil Belum Diinput**: Transaksi pembayaran sisa panjar ke pihak atau pengeluaran panggilan yang sudah dibayar tunai tetapi kwitansinya belum dijurnal.
-
-💡 **Rekomendasi Tindakan Koreksi:**
-- Telusuri bon gantung / catatan kertas pinjaman di laci meja kasir.
-- Pastikan semua kwitansi pengeluaran hari ini sudah diinput ke Buku SKUM.
-- Jika ada kekurangan panjar pihak, pisahkan dari perhitungan kas fisik riil dengan centang opsi 'Pisahkan Piutang Panjar'.`;
-  };
-
-  // Handler Pemicu Asisten AI Audit Kasir
-  const handleRunAiAudit = async () => {
-    setIsAiAuditing(true);
-    setAiAuditError(null);
-    try {
-      const casesSummary = cases.map(c => ({
-        nomorPerkara: c.nomorPerkara,
-        saldo: c.saldoPerkara,
-        panjarAwal: c.panjarAwal,
-        sisaPanjar: c.sisaPanjar
-      })).slice(0, 15);
-
-      const payload = {
-        saldoFisikKasir: auditKasFisikInput,
-        saldoStandarBuku: saldoFisikStandarBuku,
-        selisih: selisihAuditKasir,
-        totalDebet,
-        totalKredit,
-        saldoSkum,
-        biayaKasBelumSetor: effectiveBiayaKasBelumDisetor,
-        pinjamanKas: effectiveUnpaidLoanAmount,
-        totalDebetPanjarPerkara: debetBreakdown.totalPanjarMurni,
-        totalDebetPengembalianPinjaman: debetBreakdown.totalNonPanjarDebet,
-        casesSummary,
-        denominations
-      };
-
-      const res = await fetch('/api/ai-audit-kasir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
-      }
-      const data = await res.json();
-      if (data.status === 'success' && data.analysis) {
-        setAiAuditResult(data.analysis);
-      } else {
-        setAiAuditResult(generateClientAiAuditReport(payload));
-      }
-    } catch (err: any) {
-      console.warn('AI audit fallback to heuristic generator:', err);
-      setAiAuditResult(generateClientAiAuditReport({
-        saldoFisikKasir: auditKasFisikInput,
-        saldoStandarBuku: saldoFisikStandarBuku,
-        selisih: selisihAuditKasir,
-        totalDebet,
-        totalKredit,
-        saldoSkum,
-        biayaKasBelumSetor: effectiveBiayaKasBelumDisetor,
-        pinjamanKas: effectiveUnpaidLoanAmount,
-        totalDebetPanjarPerkara: debetBreakdown.totalPanjarMurni,
-        totalDebetPengembalianPinjaman: debetBreakdown.totalNonPanjarDebet
-      }));
-    } finally {
-      setIsAiAuditing(false);
-    }
   };
 
   // Cetak Berita Acara Kas Opname & Rekonsiliasi Kasir Resmi
@@ -1101,6 +988,42 @@ ${debetExplanationSection}
     setPinjamPeminjam('');
     setPinjamJumlah(0);
     setPinjamKeterangan('');
+  };
+
+  const handleOpenEditPinjaman = (p: PinjamanSkumRecord) => {
+    setEditingPinjaman(p);
+    setEditPinjamTanggal(p.tanggal || new Date().toISOString().split('T')[0]);
+    setEditPinjamNomorPerkara(p.nomorPerkara || 'Kepaniteraan Umum');
+    setEditPinjamPeminjam(p.peminjam || '');
+    setEditPinjamJumlah(p.jumlah || 0);
+    setEditPinjamKeterangan(p.keterangan || '');
+    setEditPinjamStatus(p.status || 'BELUM_DIBAYAR');
+    setEditPinjamTanggalBayar(p.tanggalBayar || new Date().toISOString().split('T')[0]);
+    setIsEditPinjamanModalOpen(true);
+  };
+
+  const handleFormSubmitEditPinjaman = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPinjaman) return;
+    if (!editPinjamPeminjam.trim() || editPinjamJumlah <= 0) {
+      alert('Mohon lengkapi peminjam / keperluan kepaniteraan dan nominal pinjaman yang valid (> 0).');
+      return;
+    }
+
+    const updated: PinjamanSkumRecord = {
+      ...editingPinjaman,
+      tanggal: editPinjamTanggal,
+      nomorPerkara: editPinjamNomorPerkara.trim() || 'Kepaniteraan Umum',
+      peminjam: editPinjamPeminjam.trim(),
+      jumlah: editPinjamJumlah,
+      keterangan: editPinjamKeterangan.trim(),
+      status: editPinjamStatus,
+      tanggalBayar: editPinjamStatus === 'SUDAH_DIBAYAR' ? (editPinjamTanggalBayar || new Date().toISOString().split('T')[0]) : undefined
+    };
+
+    onUpdatePinjaman?.(updated);
+    setIsEditPinjamanModalOpen(false);
+    setEditingPinjaman(null);
   };
 
   const handlePrintJurnalReport = () => {
@@ -1367,8 +1290,26 @@ ${debetExplanationSection}
               <Clock className="w-3.5 h-3.5" />
               <span>Riwayat ({pinjamanRecords.length})</span>
             </button>
+            {pinjamanRecords.length > 0 && (
+              <button
+                onClick={handlePushPinjamanToCloud}
+                disabled={isSyncingPinjamanToCloud}
+                className="px-3 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Kirim dan Sinkronkan semua data pinjaman ini ke tab PinjamanSaldo di Google Spreadsheet"
+              >
+                <CloudUpload className="w-3.5 h-3.5" />
+                <span>{isSyncingPinjamanToCloud ? 'Mengirim...' : 'Kirim ke Spreadsheet'}</span>
+              </button>
+            )}
           </div>
         </div>
+
+        {pinjamanSyncSuccessMessage && (
+          <div className="mt-2.5 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{pinjamanSyncSuccessMessage}</span>
+          </div>
+        )}
 
         {/* Filter Tabs for Pinjaman */}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -1406,7 +1347,7 @@ ${debetExplanationSection}
           </div>
 
           <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            Total Nilai Transaksi: <strong className="font-mono text-slate-800 dark:text-slate-200">Rp {totalAllLoansAmount.toLocaleString('id-ID')}</strong>
+            Total Nilai Filter ({displayedPinjamanList.length} Transaksi): <strong className="font-mono text-slate-800 dark:text-slate-200">Rp {displayedTotalLoanAmount.toLocaleString('id-ID')}</strong>
           </div>
         </div>
 
@@ -1465,37 +1406,84 @@ ${debetExplanationSection}
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-                    {p.status === 'BELUM_DIBAYAR' ? (
-                      <>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 flex items-center space-x-1">
+                  <div className="mt-3 pt-2.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center space-x-1">
+                      {p.status === 'BELUM_DIBAYAR' ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 flex items-center space-x-1 border border-red-300 dark:border-red-800">
                           <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
-                          <span>Belum Dibayar</span>
+                          <span>Belum Lunas</span>
                         </span>
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Konfirmasi Pelunasan Pinjaman:\n\nApakah uang saldo SKUM sebesar Rp ${p.jumlah.toLocaleString('id-ID')} dari peminjam "${p.peminjam}" (${p.nomorPerkara}) telah DIBAYAR & DIKEMBALIKAN ke Saldo SKUM?`)) {
-                              onBayarPinjaman?.(p.id);
-                            }
-                          }}
-                          className="px-3 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm hover:shadow transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer"
-                          title="Tekan jika uang sudah dikembalikan ke kas SKUM"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Sudah Dibayar</span>
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 flex items-center space-x-1">
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 flex items-center space-x-1 border border-emerald-300 dark:border-emerald-800">
                           <Check className="w-3 h-3 text-emerald-600" />
                           <span>Sudah Lunas</span>
                         </span>
-                        <span className="text-[10px] text-slate-400">
-                          {p.tanggalBayar ? `Lunas: ${p.tanggalBayar}` : 'Terselesaikan'}
+                      )}
+                      {p.tanggalBayar && p.status === 'SUDAH_DIBAYAR' && (
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          ({p.tanggalBayar})
                         </span>
-                      </>
-                    )}
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditPinjaman(p)}
+                        className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-800 shadow-2xs transition-all flex items-center space-x-1 active:scale-95 cursor-pointer"
+                        title="Edit data peminjam, nominal, tanggal, atau status pinjaman ini"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+
+                      {p.status === 'BELUM_DIBAYAR' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Konfirmasi Pelunasan Pinjaman:\n\nApakah uang saldo SKUM sebesar Rp ${p.jumlah.toLocaleString('id-ID')} dari peminjam "${p.peminjam}" (${p.nomorPerkara}) telah DIBAYAR & DIKEMBALIKAN ke Saldo SKUM?\n\n(Tindakan ini akan otomatis mencatat Pengembalian Pinjaman Debet di Jurnal SKUM sehingga saldo kembali normal)`)) {
+                              onBayarPinjaman?.(p.id);
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm hover:shadow transition-all flex items-center space-x-1 active:scale-95 cursor-pointer"
+                          title="Tandai Sudah Dibayar / Dikembalikan ke Kas SKUM"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Bayar / Lunas</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Ubah status pinjaman "${p.peminjam}" (${p.nomorPerkara}) kembali menjadi BELUM LUNAS?`)) {
+                              onUpdatePinjaman?.({
+                                ...p,
+                                status: 'BELUM_DIBAYAR',
+                                tanggalBayar: undefined
+                              });
+                            }
+                          }}
+                          className="px-2 py-1.5 rounded-xl text-[11px] font-bold bg-amber-100 hover:bg-amber-200 dark:bg-amber-950 dark:hover:bg-amber-900 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 transition-all cursor-pointer flex items-center space-x-1"
+                          title="Kembalikan status menjadi Belum Lunas"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Set Belum Lunas</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Hapus catatan peminjaman SKUM dari "${p.peminjam}" (${p.nomorPerkara})?`)) {
+                            onDeletePinjaman?.(p.id);
+                          }
+                        }}
+                        className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                        title="Hapus data pinjaman ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1547,7 +1535,7 @@ ${debetExplanationSection}
           </div>
 
           <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[9px] text-indigo-600 dark:text-indigo-400 font-semibold group-hover:underline">
-            <span>🔍 8 Panjar Masuk</span>
+            <span>🔍 {debetBreakdown.casePanjars.length} Panjar Masuk</span>
             <ArrowRight className="w-2.5 h-2.5" />
           </div>
         </div>
@@ -1642,7 +1630,7 @@ ${debetExplanationSection}
               Rp {totalUnpaidAmount.toLocaleString('id-ID')}
             </div>
             <div className="mt-1 text-[9px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
-              <span>{loanBreakdown.officeLoans > 0 ? 'Sidkel: Rp 660rb' : 'Semua Lunas'}</span>
+              <span>{loanBreakdown.officeLoans > 0 ? `Pinjaman: Rp ${loanBreakdown.officeLoans.toLocaleString('id-ID')}` : 'Semua Lunas'}</span>
               <span>{pinjamanRecords.length} Riwayat</span>
             </div>
           </div>
@@ -3398,11 +3386,10 @@ ${debetExplanationSection}
                   }`}
                   required
                 >
-                  <option value="">-- Pilih Nomor Perkara --</option>
+                  <option value="">-- Pilih Nomor Perkara / Sumber SKUM --</option>
                   {availableNomorPerkara.map(no => (
                     <option key={no} value={no}>{no}</option>
                   ))}
-                  <option value="Kepaniteraan Umum">Kepaniteraan Umum (Kas General)</option>
                 </select>
               </div>
 
@@ -3472,6 +3459,205 @@ ${debetExplanationSection}
                 >
                   <HandCoins className="w-4 h-4" />
                   <span>Simpan & Potong Saldo SKUM</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Pinjaman Saldo SKUM */}
+      {isEditPinjamanModalOpen && editingPinjaman && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className={`w-full max-w-lg rounded-2xl shadow-2xl border transition-all ${
+            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
+          }`}>
+            <div className="px-6 py-4 border-b flex items-center justify-between border-slate-200 dark:border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-sky-500 text-white rounded-xl shadow-xs">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base">Edit Pinjaman / Piutang Saldo SKUM</h3>
+                  <p className="text-xs text-slate-500">Perbarui data, nominal, atau status pelunasan pinjaman</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsEditPinjamanModalOpen(false);
+                  setEditingPinjaman(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleFormSubmitEditPinjaman} className="p-6 space-y-4">
+              <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-xs text-sky-900 dark:text-sky-200 space-y-1">
+                <div className="font-bold flex items-center space-x-1.5 text-sky-800 dark:text-sky-300">
+                  <Lightbulb className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span>Informasi Logika Saldo SKUM:</span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  Pinjaman yang statusnya <strong>"Belum Lunas"</strong> mengurangi saldo kas buku SKUM (Kredit). Mengubah status menjadi <strong>"Sudah Dibayar (Lunas)"</strong> akan otomatis mencatatkan transaksi <em>Pengembalian Pinjaman (Debet)</em> di Jurnal SKUM sehingga Saldo SKUM kembali normal dan tidak minus.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 text-slate-600 dark:text-slate-400">
+                    Tanggal Peminjaman
+                  </label>
+                  <input
+                    type="date"
+                    value={editPinjamTanggal}
+                    onChange={(e) => setEditPinjamTanggal(e.target.value)}
+                    className={`w-full px-3 py-2 text-sm rounded-xl border focus:ring-2 focus:ring-sky-500 ${
+                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-800 border-slate-700 text-white'
+                    }`}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 text-slate-600 dark:text-slate-400">
+                    Nomor Perkara / Sumber
+                  </label>
+                  <input
+                    type="text"
+                    value={editPinjamNomorPerkara}
+                    onChange={(e) => setEditPinjamNomorPerkara(e.target.value)}
+                    placeholder="e.g. Kepaniteraan Umum / 2/Pdt.G/2026/PA.Pan"
+                    className={`w-full px-3 py-2 text-sm rounded-xl border focus:ring-2 focus:ring-sky-500 ${
+                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-800 border-slate-700 text-white'
+                    }`}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1 text-slate-600 dark:text-slate-400">
+                  Peminjam / Keperluan Kepaniteraan
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Pembelian Map ATK / Uang Skum Panjar tidak lengkap"
+                  value={editPinjamPeminjam}
+                  onChange={(e) => setEditPinjamPeminjam(e.target.value)}
+                  className={`w-full px-3 py-2 text-sm rounded-xl border focus:ring-2 focus:ring-sky-500 ${
+                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-800 border-slate-700 text-white'
+                  }`}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1 text-slate-600 dark:text-slate-400">
+                  Jumlah Nominal (Rp)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-sm font-bold text-slate-400">Rp</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editPinjamJumlah || ''}
+                    onChange={(e) => setEditPinjamJumlah(Number(e.target.value))}
+                    className={`w-full pl-10 pr-3 py-2 text-sm font-mono font-bold rounded-xl border focus:ring-2 focus:ring-sky-500 ${
+                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-800 border-slate-700 text-white'
+                    }`}
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Status Pelunasan */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1.5 text-slate-600 dark:text-slate-400">
+                  Status Pelunasan Pinjaman
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditPinjamStatus('BELUM_DIBAYAR')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                      editPinjamStatus === 'BELUM_DIBAYAR'
+                        ? 'bg-red-600 text-white border-red-600 shadow-sm'
+                        : isLight 
+                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' 
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Belum Lunas</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditPinjamStatus('SUDAH_DIBAYAR')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                      editPinjamStatus === 'SUDAH_DIBAYAR'
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                        : isLight 
+                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' 
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Sudah Lunas</span>
+                  </button>
+                </div>
+              </div>
+
+              {editPinjamStatus === 'SUDAH_DIBAYAR' && (
+                <div className="animate-fade-in">
+                  <label className="block text-xs font-bold uppercase tracking-wider mb-1 text-emerald-700 dark:text-emerald-400">
+                    Tanggal Pelunasan / Pengembalian
+                  </label>
+                  <input
+                    type="date"
+                    value={editPinjamTanggalBayar}
+                    onChange={(e) => setEditPinjamTanggalBayar(e.target.value)}
+                    className={`w-full px-3 py-2 text-sm rounded-xl border focus:ring-2 focus:ring-emerald-500 ${
+                      isLight ? 'bg-emerald-50/50 border-emerald-300 text-slate-900' : 'bg-emerald-950/30 border-emerald-700 text-white'
+                    }`}
+                    required
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1 text-slate-600 dark:text-slate-400">
+                  Catatan / Keterangan Tambahan
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Catatan pelunasan atau keterangan bukti pinjaman"
+                  value={editPinjamKeterangan}
+                  onChange={(e) => setEditPinjamKeterangan(e.target.value)}
+                  className={`w-full px-3 py-2 text-sm rounded-xl border focus:ring-2 focus:ring-sky-500 ${
+                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-800 border-slate-700 text-white'
+                  }`}
+                />
+              </div>
+
+              <div className="pt-3 flex items-center justify-end space-x-2 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditPinjamanModalOpen(false);
+                    setEditingPinjaman(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white shadow-md flex items-center space-x-1.5 transition-all cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Simpan Perubahan</span>
                 </button>
               </div>
             </form>
@@ -3732,20 +3918,6 @@ ${debetExplanationSection}
                       <Coins className="w-3 h-3" />
                       <span>{isDenominationOpen ? 'Tutup Pecahan' : '💵 Kalkulator Pecahan Fisik'}</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleRunAiAudit}
-                      disabled={isAiAuditing}
-                      className="px-2.5 py-1.5 rounded-lg text-[10px] font-black bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-xs transition-all active:scale-95 cursor-pointer flex items-center space-x-1"
-                      title="Jalankan analisis akar masalah berbasis Asisten AI Gemini secara otomatis"
-                    >
-                      {isAiAuditing ? (
-                        <RefreshCw className="w-3 h-3 animate-spin text-white" />
-                      ) : (
-                        <Bot className="w-3 h-3 text-purple-200" />
-                      )}
-                      <span>{isAiAuditing ? 'Menganalisis...' : '🤖 Asisten AI Audit'}</span>
-                    </button>
                   </div>
                 </div>
 
@@ -3932,7 +4104,7 @@ ${debetExplanationSection}
                       className="px-3 py-1.5 rounded-lg text-xs font-black bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-all active:scale-95 flex items-center space-x-1"
                       title="Sinkronkan nilai kas belum setor pada sistem agar Saldo Sesungguhnya persis sama dengan uang fisik kasir"
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Zap className="w-3.5 h-3.5" />
                       <span>⚡ Terapkan Aktual Kasir ke Sistem</span>
                     </button>
                     <button
@@ -3946,198 +4118,289 @@ ${debetExplanationSection}
                   </div>
                 </div>
 
-                {/* Audit Explanation Breakdown (Menyesuaikan Input Kasir & Data Riil) */}
+                {/* Audit Explanation Breakdown (Analisis Kasir & Rekonsiliasi) */}
                 <div className="p-3.5 rounded-xl bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 space-y-3 text-[11px]">
                   <div className="font-bold text-slate-800 dark:text-slate-200 flex flex-wrap items-center justify-between gap-1.5 pb-1 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex items-center space-x-2">
                       <Search className="w-4 h-4 text-indigo-600" />
                       <span className="font-black text-xs text-indigo-950 dark:text-indigo-200">
-                        🔍 Analisis Akar Masalah Kasir (Fisik: Rp {auditKasFisikInput.toLocaleString('id-ID')} vs Sistem: Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}):
+                        Analisis Rekonsiliasi Kasir (Uang Fisik di Laci: Rp {auditKasFisikInput.toLocaleString('id-ID')} vs Target Kas: Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}):
                       </span>
                     </div>
-                    <label className="flex items-center space-x-1.5 cursor-pointer text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
-                      <input
-                        type="checkbox"
-                        checked={excludePanjarKurangFromCash}
-                        onChange={(e) => setExcludePanjarKurangFromCash(e.target.checked)}
-                        className="rounded text-indigo-600"
-                      />
-                      <span>Pisahkan Piutang Panjar 2/Pdt.G (Rp 290.000) dari Kas Fisik</span>
-                    </label>
                   </div>
 
-                  {/* Dinamis Sesuai Input Kasir */}
+                  {/* Penjelasan Ringkas & Mudah Dipahami Awam */}
                   <ul className="space-y-2 list-disc pl-4 text-slate-600 dark:text-slate-300">
                     <li>
-                      <strong>1. Status Rekonsiliasi Kasir:</strong>{' '}
+                      <strong>1. Status Kesesuaian Kas Opname:</strong>{' '}
                       {auditKasFisikInput === 0 ? (
                         <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                          Belum ada nilai fisik kasir yang diinput. Kas standar pembukuan yang harus dipertanggungjawabkan adalah <strong>Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}</strong> (terdiri dari Sisa Panjar Perkara Rp {totalSisaPanjarMurniPerkara.toLocaleString('id-ID')} + Kas Belum Setor Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}).
+                          Belum ada nominal uang fisik kasir yang diinput. Uang tunai yang wajib ada di laci meja kasir saat ini adalah <strong>Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}</strong>.
                         </span>
                       ) : selisihAuditKasir === 0 ? (
                         <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                          ✓ Kas Opname 100% Cocok & Seimbang (Pas). Uang fisik tunai kasir sebesar Rp {auditKasFisikInput.toLocaleString('id-ID')} persis sama dengan total kewajiban pembukuan SKUM.
+                          ✓ Kas Opname 100% Cocok & Seimbang (Pas). Uang fisik tunai kasir sebesar Rp {auditKasFisikInput.toLocaleString('id-ID')} persis seimbang dengan kewajiban kasir.
                         </span>
                       ) : selisihAuditKasir > 0 ? (
                         <span className="text-amber-700 dark:text-amber-300 font-bold">
-                          Terdapat Surplus Uang Fisik Kasir sebesar +Rp {selisihAuditKasir.toLocaleString('id-ID')} (Uang tunai di laci kasir lebih banyak daripada catatan buku standar Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}).
+                          Terdapat Surplus Uang Fisik Kasir sebesar +Rp {selisihAuditKasir.toLocaleString('id-ID')} (Uang tunai di laci kasir lebih banyak daripada kewajiban tunai Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}).
                         </span>
                       ) : (
                         <span className="text-rose-700 dark:text-rose-300 font-bold">
-                          Terdapat Defisit Uang Fisik Kasir sebesar -Rp {Math.abs(selisihAuditKasir).toLocaleString('id-ID')} (Uang tunai di laci kasir kurang dari kewajiban buku standar Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}).
+                          Terdapat Defisit Uang Fisik Kasir sebesar -Rp {Math.abs(selisihAuditKasir).toLocaleString('id-ID')} (Uang tunai di laci kasir kurang Rp {Math.abs(selisihAuditKasir).toLocaleString('id-ID')} dari kewajiban tunai Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}).
                         </span>
                       )}
                     </li>
 
                     <li>
-                      <strong>2. Masalah Transaksi Piutang Panjar Rp 290.000 (Perkara 2/Pdt.G/2026/PA.Pan):</strong> Di perkara 2/Pdt.G terdapat catatan <em>"Peminjaman Saldo SKUM: Uang panjar tidak lengkap (Skul panjar belum full dari pihak)"</em> sebesar <strong>Rp 290.000</strong>. Uang ini merupakan kekurangan bayar pihak berperkara (belum pernah masuk secara fisik ke kasir). Dengan memisahkan piutang ini, standar kas fisik kembali murni ke <strong>Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}</strong>.
+                      <strong>2. Sisa Panjar Murni Para Pihak:</strong> Total sisa uang panjar perkara aktif milik pihak yang belum terpakai adalah <strong>Rp {totalSisaPanjarMurniPerkara.toLocaleString('id-ID')}</strong>.
                     </li>
 
-                    {loanBreakdown.officeLoans > 0 && (
+                    {effectiveBiayaKasBelumDisetor > 0 && (
                       <li>
-                        <strong>3. Pinjaman Sidang Keliling Kepaniteraan (Rp {loanBreakdown.officeLoans.toLocaleString('id-ID')}):</strong> Uang kas sebesar Rp {loanBreakdown.officeLoans.toLocaleString('id-ID')} dipinjamkan sementara untuk belanja operasional sidang keliling dan belum dikembalikan. Jika bon pinjaman ini dihitung bersama uang fisik kasir, total pertanggungjawaban fisik kasir adalah <strong>Rp {(auditKasFisikInput + loanBreakdown.officeLoans).toLocaleString('id-ID')}</strong>.
+                        <strong>3. Titipan Biaya Belum Disetor ke Bendahara:</strong> Uang tunai biaya proses/PNBP yang sudah ditarik dari panjar namun fisiknya masih tersimpan di laci kasir (belum disetor) sebesar <strong>Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}</strong>.
+                      </li>
+                    )}
+
+                    {effectiveUnpaidLoanAmount > 0 && (
+                      <li className="text-rose-700 dark:text-rose-300">
+                        <strong>4. Bon / Pinjaman Operasional Kasir (Belum Lunas):</strong> Terdapat uang kasir sebesar <strong>Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</strong> yang sedang dipinjam sementara untuk kegiatan dinas/operasional kantor (dipegang dalam bentuk kwitansi bon sementara, bukan uang fisik di laci).
                       </li>
                     )}
 
                     {selisihAuditKasir !== 0 && auditKasFisikInput > 0 && (
                       <li>
-                        <strong>4. Identifikasi Sumber Selisih Rp {Math.abs(selisihAuditKasir).toLocaleString('id-ID')}:</strong>
+                        <strong>5. Sumber Potensi Selisih Rp {Math.abs(selisihAuditKasir).toLocaleString('id-ID')}:</strong>
                         <ul className="list-circle pl-4 mt-1 space-y-0.5 text-[10px] text-slate-500 dark:text-slate-400">
                           {selisihAuditKasir === 9000 && (
                             <li className="text-indigo-600 dark:text-indigo-300 font-medium">
-                              • Terdeteksi selisih Rp 9.000: Cocok dengan perbedaan resi Pos di perkara 5/Pdt.G Panggilan II (tercatat Rp 64.900 berakhiran 900) atau perbedaan pencatatan komponen meterai/PNBP/redaksi Rp 10.000 vs riil Rp 1.000.
+                              • Terdeteksi selisih Rp 9.000: Kemungkinan berasal dari pembulatan resi kurir/Pos atau perbedaan pencatatan komponen meterai/PNBP/redaksi.
                             </li>
                           )}
-                          <li>• Resi Pos & Kurir berakhiran ganjil yang dibulatkan saat pembayaran.</li>
-                          <li>• Kembalian sisa belanja sidang keliling / delegasi / panggilan yang belum disetorkan kembali ke kasir.</li>
-                          <li>• Titipan panjar perkara baru atau biaya fotokopi/redaksi yang belum diinput ke jurnal harian.</li>
+                          <li>• Resi pengiriman Pos/ekspedisi berakhiran ganjil yang dibulatkan saat pembayaran.</li>
+                          <li>• Sisa belanja panggilan/sidang keliling yang belum disetorkan kembali ke kasir.</li>
+                          <li>• Kwitansi pengeluaran atau penerimaan tunai hari ini yang belum sempat terinput di sistem.</li>
                         </ul>
                       </li>
                     )}
                   </ul>
-
-                  {/* Panel Asisten AI Audit (Gemini) */}
-                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center space-x-2">
-                        <div className="p-1.5 rounded-lg bg-purple-600 text-white shadow-2xs">
-                          <Bot className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="font-black text-purple-950 dark:text-purple-200 text-xs">
-                          Asisten AI Audit Kasir (Gemini):
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleRunAiAudit}
-                        disabled={isAiAuditing}
-                        className="px-3 py-1 rounded-lg text-xs font-black bg-purple-600 hover:bg-purple-500 text-white shadow-2xs transition-all active:scale-95 flex items-center space-x-1 cursor-pointer"
-                      >
-                        {isAiAuditing ? (
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-3 h-3 text-purple-200" />
-                        )}
-                        <span>{isAiAuditing ? 'Menganalisis...' : aiAuditResult ? '🔄 Analisis Ulang AI' : '✨ Jalankan Analisis AI'}</span>
-                      </button>
-                    </div>
-
-                    {aiAuditResult && (
-                      <div className="p-3 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 space-y-2 animate-fade-in text-[11px]">
-                        <div className="flex items-center justify-between border-b border-purple-200/60 dark:border-purple-800/60 pb-1.5">
-                          <span className="font-bold text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
-                            <BrainCircuit className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                            <span>Hasil Analisis AI Audit Kasir</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(aiAuditResult);
-                              setAiAuditCopied(true);
-                              setTimeout(() => setAiAuditCopied(false), 2000);
-                            }}
-                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-200 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200 hover:bg-purple-300 transition-all flex items-center space-x-1 cursor-pointer"
-                          >
-                            {aiAuditCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                            <span>{aiAuditCopied ? 'Tersalin!' : 'Salin Laporan AI'}</span>
-                          </button>
-                        </div>
-                        <div className="text-slate-700 dark:text-slate-300 whitespace-pre-line leading-relaxed font-sans">
-                          {aiAuditResult}
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
 
-              {/* Tabel Rincian Rekonsiliasi Lengkap */}
-              <div>
-                <h4 className="font-bold text-slate-800 dark:text-slate-200 mb-2">
-                  Tabel Rincian Rekonsiliasi Kas:
-                </h4>
-                <div className="border rounded-xl overflow-hidden border-slate-200 dark:border-slate-800">
+              {/* Tabel Rincian Rekonsiliasi Kas (Format Bersih & Mudah Dibaca Awam) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Tabel Rincian Rekonsiliasi Kasir:</span>
+                  </h4>
+                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md">
+                    Format Standar Kas Opname
+                  </span>
+                </div>
+
+                <div className="border rounded-2xl overflow-hidden border-slate-200 dark:border-slate-800 shadow-xs">
                   <table className="w-full text-left text-xs border-collapse">
-                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                      <tr className="bg-slate-50 dark:bg-slate-800/40 font-medium">
-                        <td className="p-2.5">Total Penerimaan Panjar Masuk (Debet SKUM)</td>
-                        <td className="p-2.5 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                          Rp {totalDebet.toLocaleString('id-ID')}
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800/80 text-[11px] font-bold text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800">
+                        <th className="p-3">Pos Aliran Dana / Keterangan</th>
+                        <th className="p-3 text-center w-24">Sifat</th>
+                        <th className="p-3 text-right">Nominal (Rp)</th>
+                        <th className="p-3 text-slate-500 text-[10px]">Penjelasan Ringkas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      {/* Baris 1: Penerimaan Panjar Awal */}
+                      <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                        <td className="p-3 font-semibold text-slate-900 dark:text-white">
+                          1. Penerimaan Panjar Awal Perkara Masuk
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            Debet (+)
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3 text-slate-500 dark:text-slate-400 text-[11px]">
+                          Total panjar awal dari {debetBreakdown.casePanjars.length} perkara masuk.
                         </td>
                       </tr>
-                      <tr>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-400">Total Kredit Pengeluaran Tercatat di Buku SKUM</td>
-                        <td className="p-2.5 text-right font-mono text-rose-600 dark:text-rose-400 font-semibold">
-                          (Rp {totalKredit.toLocaleString('id-ID')})
-                        </td>
-                      </tr>
-                      <tr className="bg-sky-50/50 dark:bg-sky-950/20 font-bold">
-                        <td className="p-2.5 text-sky-900 dark:text-sky-200">Saldo Buku SKUM Perkara (Debet - Kredit)</td>
-                        <td className="p-2.5 text-right font-mono text-sky-700 dark:text-sky-300">
-                          Rp {saldoSkum.toLocaleString('id-ID')}
-                        </td>
-                      </tr>
-                      <tr className="bg-amber-50/40 dark:bg-amber-950/20">
-                        <td className="p-2.5 text-amber-900 dark:text-amber-200">
-                          (+) Biaya Kas Belum Disetor ke Bendahara (Uang Cash di Kasir)
-                        </td>
-                        <td className="p-2.5 text-right font-mono font-bold text-amber-700 dark:text-amber-300">
-                          + Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
-                        </td>
-                      </tr>
-                      {effectiveUnpaidLoanAmount > 0 && (
-                        <tr className="bg-rose-50/40 dark:bg-rose-950/20">
-                          <td className="p-2.5 text-rose-900 dark:text-rose-200">
-                            (+) Pinjaman Saldo SKUM Kepaniteraan (Belum Kembali)
+
+                      {/* Baris 2: Pengembalian Pinjaman jika ada */}
+                      {debetBreakdown.totalNonPanjarDebet > 0 && (
+                        <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 bg-amber-50/30 dark:bg-amber-950/20">
+                          <td className="p-3 font-semibold text-amber-900 dark:text-amber-200">
+                            2. Pengembalian Pinjaman / Pelunasan Bon SKUM
                           </td>
-                          <td className="p-2.5 text-right font-mono font-bold text-rose-700 dark:text-rose-300">
-                            + Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}
+                          <td className="p-3 text-center">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                              Debet (+)
+                            </span>
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                            + Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}
+                          </td>
+                          <td className="p-3 text-slate-500 dark:text-slate-400 text-[11px]">
+                            Uang pinjaman kasir yang sudah lunas dikembalikan ke kas.
                           </td>
                         </tr>
                       )}
-                      <tr className="bg-emerald-100/60 dark:bg-emerald-950/60 font-black border-t-2 border-emerald-500">
-                        <td className="p-3 text-emerald-950 dark:text-emerald-100 text-sm">
-                          SALDO SESUNGGUHNYA (KAS RIIL FISIK)
+
+                      {/* Baris 3: Total Pengeluaran Biaya SKUM */}
+                      <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                        <td className="p-3 font-semibold text-slate-900 dark:text-white">
+                          3. Pengeluaran Biaya Perkara Tercatat di Buku
                         </td>
-                        <td className="p-3 text-right font-mono text-sm text-emerald-700 dark:text-emerald-300">
-                          Rp {saldoSesungguhnya.toLocaleString('id-ID')}
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                            Kredit (-)
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-rose-600 dark:text-rose-400">
+                          - Rp {totalKredit.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3 text-slate-500 dark:text-slate-400 text-[11px]">
+                          Biaya panggilan pos/relaas, ATK, meterai, dan redaksi.
                         </td>
                       </tr>
-                      <tr className="bg-slate-50 dark:bg-slate-800/40 font-medium">
-                        <td className="p-2.5 text-slate-600 dark:text-slate-300">
-                          (+) Biaya Kas yang Telah Disetor ke Kas Negara / Bendahara (Hijau)
+
+                      {/* Baris 4: Sisa Saldo Panjar Buku */}
+                      <tr className="bg-sky-50/60 dark:bg-sky-950/40 font-bold border-t border-sky-200 dark:border-sky-800">
+                        <td className="p-3 text-sky-950 dark:text-sky-100">
+                          4. Saldo Buku SKUM (Sisa Hak Pihak Berperkara)
                         </td>
-                        <td className="p-2.5 text-right font-mono text-slate-700 dark:text-slate-300">
-                          + Rp {biayaKasKeluarDisetor.toLocaleString('id-ID')}
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-200 text-sky-900 dark:bg-sky-900 dark:text-sky-200">
+                            Sisa Kas
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono text-sky-700 dark:text-sky-300 font-extrabold">
+                          Rp {saldoSkum.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3 text-sky-800 dark:text-sky-300 text-[11px]">
+                          Total penerimaan dikurangi total pengeluaran buku.
                         </td>
                       </tr>
-                      <tr className="bg-emerald-50 dark:bg-emerald-950 font-black border-t border-emerald-300 dark:border-emerald-700">
-                        <td className="p-3 text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
-                          <Check className="w-4 h-4 text-emerald-600" />
-                          <span>TOTAL REKONSILIASI AKHIR (SEIMBANG DEBET SKUM)</span>
+
+                      {/* Baris 5: Biaya Kas Belum Disetor */}
+                      <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 bg-amber-50/40 dark:bg-amber-950/30">
+                        <td className="p-3 font-semibold text-amber-950 dark:text-amber-200">
+                          5. Biaya Kas Belum Disetor ke Bendahara (Akan Disetor)
                         </td>
-                        <td className="p-3 text-right font-mono text-emerald-700 dark:text-emerald-300 font-extrabold text-sm">
-                          Rp {(saldoSesungguhnya + biayaKasKeluarDisetor - effectiveUnpaidLoanAmount).toLocaleString('id-ID')}
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200">
+                            Titipan (+)
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-amber-700 dark:text-amber-300">
+                          + Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3 text-slate-600 dark:text-slate-400 text-[11px]">
+                          Uang tunai biaya yang ditarik dari panjar dan masih disimpan di laci kasir (belum disetor ke bendahara).
+                        </td>
+                      </tr>
+
+                      {/* Baris 6: Total Standar Pertanggungjawaban Buku */}
+                      <tr className="bg-indigo-50/70 dark:bg-indigo-950/60 font-black border-t-2 border-indigo-300 dark:border-indigo-700">
+                        <td className="p-3.5 text-indigo-950 dark:text-indigo-100">
+                          6. Total Standar Pertanggungjawaban Kasir (4 + 5)
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-600 text-white">
+                            Standar
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-base text-indigo-700 dark:text-indigo-300">
+                          Rp {saldoFisikStandarBuku.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3.5 text-indigo-900 dark:text-indigo-200 text-[11px] font-semibold">
+                          Total nilai yang wajib dipertanggungjawabkan kasir.
+                        </td>
+                      </tr>
+
+                      {/* Baris 7: Pinjaman / Bon Sementara jika ada */}
+                      {effectiveUnpaidLoanAmount > 0 && (
+                        <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 bg-rose-50/40 dark:bg-rose-950/30">
+                          <td className="p-3 font-semibold text-rose-950 dark:text-rose-200">
+                            7. Pinjaman Kasir / Bon Sementara (Sidkel / Bon Belum Kembali)
+                          </td>
+                          <td className="p-3 text-center">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-200 text-rose-900 dark:bg-rose-900 dark:text-rose-200">
+                              Bon (-)
+                            </span>
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-rose-700 dark:text-rose-300">
+                            - Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}
+                          </td>
+                          <td className="p-3 text-slate-600 dark:text-slate-400 text-[11px]">
+                            Uang yang sedang dipinjam sementara dan dipegang berupa bukti bon/kwitansi (bukan uang fisik di laci).
+                          </td>
+                        </tr>
+                      )}
+
+                      {/* Baris 8: Uang Tunai Murni yang Wajib Ada di Laci */}
+                      <tr className="bg-emerald-100/70 dark:bg-emerald-950/80 font-black border-t-2 border-emerald-500">
+                        <td className="p-3.5 text-emerald-950 dark:text-emerald-100 text-sm">
+                          8. Uang Tunai yang Seharusnya Ada di Laci Kasir (6 - 7)
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-600 text-white">
+                            Target Kas
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-base text-emerald-700 dark:text-emerald-300">
+                          Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3.5 text-emerald-900 dark:text-emerald-200 text-[11px] font-bold">
+                          Uang fisik tunai yang wajib ada di laci meja kasir saat dihitung.
+                        </td>
+                      </tr>
+
+                      {/* Baris 9: Uang Fisik Aktual di Kasir */}
+                      <tr className="bg-white dark:bg-slate-900 font-bold border-t border-slate-200 dark:border-slate-800">
+                        <td className="p-3 text-slate-900 dark:text-white">
+                          9. Uang Fisik Aktual di Laci Kasir (Hasil Kas Opname)
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
+                            Fisik Riil
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-mono text-base font-black text-indigo-600 dark:text-indigo-400">
+                          Rp {auditKasFisikInput.toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-3 text-slate-600 dark:text-slate-400 text-[11px]">
+                          Nominal uang tunai fisik yang benar-benar ada di meja kasir.
+                        </td>
+                      </tr>
+
+                      {/* Baris 10: Selisih Kas Opname */}
+                      <tr className={`font-black border-t-2 ${
+                        selisihAuditKasir === 0 
+                          ? 'bg-emerald-500 text-white' 
+                          : selisihAuditKasir > 0 
+                            ? 'bg-amber-500 text-slate-950' 
+                            : 'bg-rose-600 text-white'
+                      }`}>
+                        <td className="p-3.5 text-sm">
+                          10. KESIMPULAN REKONSILIASI KAS OPNAME (9 - 8)
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-black/20 text-inherit">
+                            {selisihAuditKasir === 0 ? 'COCOK / PAS' : selisihAuditKasir > 0 ? 'SURPLUS' : 'DEFISIT'}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono text-base">
+                          {selisihAuditKasir === 0 ? 'Rp 0 (SEIMBANG)' : `${selisihAuditKasir > 0 ? '+' : ''}Rp ${selisihAuditKasir.toLocaleString('id-ID')}`}
+                        </td>
+                        <td className="p-3.5 text-[11px] font-semibold">
+                          {selisihAuditKasir === 0 
+                            ? 'Uang fisik tunai kasir 100% cocok sempurna dengan kewajiban pembukuan.' 
+                            : selisihAuditKasir > 0 
+                              ? `Uang tunai di laci kasir lebih banyak Rp ${selisihAuditKasir.toLocaleString('id-ID')}.` 
+                              : `Uang tunai di laci kasir kurang Rp ${Math.abs(selisihAuditKasir).toLocaleString('id-ID')}.`}
                         </td>
                       </tr>
                     </tbody>
@@ -4225,20 +4488,38 @@ ${debetExplanationSection}
             </div>
 
             <div className="p-6 overflow-y-auto space-y-4">
-              <div className="flex items-center justify-between">
+              {pinjamanSyncSuccessMessage && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-bold flex items-center space-x-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <span>{pinjamanSyncSuccessMessage}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   Total {pinjamanRecords.length} Catatan Transaksi Peminjaman
                 </span>
-                <button
-                  onClick={() => {
-                    setIsRiwayatPinjamanModalOpen(false);
-                    setIsPinjamanModalOpen(true);
-                  }}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-1"
-                >
-                  <PlusCircle className="w-3.5 h-3.5" />
-                  <span>+ Tambah Pinjaman</span>
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handlePushPinjamanToCloud}
+                    disabled={isSyncingPinjamanToCloud || pinjamanRecords.length === 0}
+                    className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center space-x-1.5 shadow-xs transition-colors"
+                    title="Kirim dan tuliskan seluruh data pinjaman ke tab PinjamanSaldo di Google Spreadsheet"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPinjamanToCloud ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingPinjamanToCloud ? 'Menyinkronkan...' : 'Kirim ke Spreadsheet'}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsRiwayatPinjamanModalOpen(false);
+                      setIsPinjamanModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-1"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>+ Tambah Pinjaman</span>
+                  </button>
+                </div>
               </div>
 
               {pinjamanRecords.length === 0 ? (
@@ -4289,7 +4570,17 @@ ${debetExplanationSection}
                           </td>
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center space-x-1">
-                              {p.status === 'BELUM_DIBAYAR' && (
+                              <button
+                                onClick={() => {
+                                  setIsRiwayatPinjamanModalOpen(false);
+                                  handleOpenEditPinjaman(p);
+                                }}
+                                className="p-1.5 text-sky-600 hover:text-sky-800 rounded-lg hover:bg-sky-100 dark:hover:bg-sky-950/50 transition-colors"
+                                title="Edit Data & Status Pinjaman"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              {p.status === 'BELUM_DIBAYAR' ? (
                                 <button
                                   onClick={() => {
                                     if (window.confirm(`Konfirmasi: Kembalikan uang pinjaman Rp ${p.jumlah.toLocaleString('id-ID')} (${p.peminjam}) ke Saldo SKUM?`)) {
@@ -4301,6 +4592,22 @@ ${debetExplanationSection}
                                 >
                                   Sudah Dibayar
                                 </button>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm(`Ubah status pinjaman "${p.peminjam}" kembali menjadi BELUM LUNAS?`)) {
+                                      onUpdatePinjaman?.({
+                                        ...p,
+                                        status: 'BELUM_DIBAYAR',
+                                        tanggalBayar: undefined
+                                      });
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 dark:bg-amber-950 dark:hover:bg-amber-900 dark:text-amber-300 rounded-lg text-[10px] font-bold"
+                                  title="Set Belum Lunas"
+                                >
+                                  Set Belum Lunas
+                                </button>
                               )}
                               <button
                                 onClick={() => {
@@ -4308,7 +4615,7 @@ ${debetExplanationSection}
                                     onDeletePinjaman?.(p.id);
                                   }
                                 }}
-                                className="p-1 text-rose-500 hover:text-rose-700 rounded hover:bg-rose-100 dark:hover:bg-rose-950/50"
+                                className="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950/50 transition-colors"
                                 title="Hapus Record"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />

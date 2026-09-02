@@ -81,7 +81,9 @@ export default function App() {
 
       const isPeminjamanPinjaman = (kat === 'Pinjaman' && !isPengembalianPinjaman) ||
                                    uraianLower.includes('peminjaman saldo') || 
-                                   uraianLower.includes('pinjam saldo');
+                                   uraianLower.includes('pinjam saldo') ||
+                                   r.id.startsWith('skum-pinjam') ||
+                                   r.id.startsWith('pinjam-');
 
       const isExplicitPanjarAwal = uraianLower.includes('panjar awal') || 
                                    uraianLower.includes('penerimaan panjar') || 
@@ -262,12 +264,128 @@ export default function App() {
       return {
         ...c,
         panjarAwal: effectivePanjar > 0 ? effectivePanjar : c.panjarAwal,
-        pengeluaran: caseSkumLogs.length > 0 ? totalPengeluaran : 0,
+        pengeluaran: caseSkumLogs.length > 0 ? totalPengeluaran : (c.pengeluaran || 0),
         saldoPerkara: newSaldo,
         status: newStatus,
         updatedAt: new Date().toISOString()
       };
     });
+  };
+
+  // Helper to guarantee 2-way synchronization between PinjamanSKUM and JurnalBiayaSKUM:
+  // 1. Any loan in Pinjaman records MUST appear as an expense (pengeluaran) in Jurnal SKUM.
+  // 2. Any repaid loan in Pinjaman records MUST appear as an income (penerimaan) in Jurnal SKUM.
+  // 3. Any loan in Jurnal SKUM is reconstructed into Pinjaman records.
+  const synchronizePinjamanAndJurnal = (
+    jurnalRecords: JurnalBiayaSkumRecord[],
+    pinjamanList: PinjamanSkumRecord[],
+    isFromLiveSheet: boolean = false
+  ): { syncedJurnal: JurnalBiayaSkumRecord[]; syncedPinjaman: PinjamanSkumRecord[] } => {
+    const updatedJurnal = [...jurnalRecords];
+    let updatedPinjaman = [...pinjamanList];
+
+    const existingPengeluaranKeys = new Set<string>();
+    const existingPenerimaanKeys = new Set<string>();
+
+    updatedJurnal.forEach(j => {
+      const isLoanExpense = SyncService.isPinjamanExpense(j.uraian, j.kategori, j.keterangan, j.id);
+      const isLoanRepayment = SyncService.isPinjamanRepayment(j.uraian, j.kategori, j.keterangan);
+
+      if (isLoanExpense && (Number(j.pengeluaran) || 0) > 0) {
+        existingPengeluaranKeys.add(`${j.tanggal}-${j.pengeluaran}`);
+        existingPengeluaranKeys.add(j.id);
+      }
+      if (isLoanRepayment && (Number(j.penerimaan) || 0) > 0) {
+        existingPenerimaanKeys.add(`${j.tanggal}-${j.penerimaan}`);
+        existingPenerimaanKeys.add(j.id);
+      }
+    });
+
+    // If syncing from live sheet, purge phantom loans that don't exist in sheet
+    if (isFromLiveSheet && pinjamanList.length === 0) {
+      // Sheet has no explicit Pinjaman tab rows; build purely from Jurnal
+      updatedPinjaman = [];
+    }
+
+    // 2. Ensure every valid loan in Pinjaman list exists in Jurnal SKUM
+    updatedPinjaman.forEach(p => {
+      if (!p.jumlah || p.jumlah <= 0) return;
+      const loanKey = `${p.tanggal}-${p.jumlah}`;
+      const hasDisbursement = existingPengeluaranKeys.has(loanKey) || (p.skumPengeluaranId && existingPengeluaranKeys.has(p.skumPengeluaranId));
+
+      if (!hasDisbursement && !isFromLiveSheet) {
+        const newDisbursementId = p.skumPengeluaranId || `skum-pinjam-${p.id}`;
+        updatedJurnal.push({
+          id: newDisbursementId,
+          tanggal: p.tanggal || new Date().toISOString().split('T')[0],
+          nomorPerkara: p.nomorPerkara || 'Kepaniteraan Umum',
+          uraian: `Peminjaman Saldo SKUM: ${p.peminjam || 'Kepaniteraan'} (${p.keterangan || 'Pinjaman Operasional'})`,
+          penerimaan: 0,
+          pengeluaran: p.jumlah,
+          kategori: 'Pinjaman',
+          keterangan: `Peminjaman Saldo SKUM Kepaniteraan [WARNA:oranye]`,
+          warnaBaris: 'oranye',
+          createdAt: p.createdAt || new Date().toISOString()
+        });
+        existingPengeluaranKeys.add(loanKey);
+        existingPengeluaranKeys.add(newDisbursementId);
+      }
+
+      // If loan is already paid, ensure repayment is in Jurnal SKUM
+      const isPaid = p.status === 'SUDAH_DIBAYAR';
+      if (isPaid) {
+        const repayDate = p.tanggalBayar || p.tanggal || new Date().toISOString().split('T')[0];
+        const repayKey = `${repayDate}-${p.jumlah}`;
+        const hasRepayment = existingPenerimaanKeys.has(repayKey) || (p.skumPengembalianId && existingPenerimaanKeys.has(p.skumPengembalianId));
+
+        if (!hasRepayment && !isFromLiveSheet) {
+          const newRepaymentId = p.skumPengembalianId || `skum-kembali-${p.id}`;
+          updatedJurnal.push({
+            id: newRepaymentId,
+            tanggal: repayDate,
+            nomorPerkara: p.nomorPerkara || 'Kepaniteraan Umum',
+            uraian: `Pengembalian Pinjaman Saldo SKUM: ${p.peminjam || 'Kepaniteraan'}`,
+            penerimaan: p.jumlah,
+            pengeluaran: 0,
+            kategori: 'Pinjaman',
+            keterangan: `Pelunasan Pinjaman Saldo SKUM Kepaniteraan [WARNA:hijau]`,
+            warnaBaris: 'hijau',
+            createdAt: p.createdAt || new Date().toISOString()
+          });
+          existingPenerimaanKeys.add(repayKey);
+          existingPenerimaanKeys.add(newRepaymentId);
+        }
+      }
+    });
+
+    // 3. Reconstruct any loans in Jurnal SKUM into Pinjaman records
+    const reconstructed = SyncService.reconstructPinjamanFromJurnal(updatedJurnal);
+    reconstructed.forEach(r => {
+      const key = `${r.tanggal}-${r.jumlah}-${(r.peminjam || '').toLowerCase()}`;
+      const existingIndex = updatedPinjaman.findIndex(p => 
+        `${p.tanggal}-${p.jumlah}-${(p.peminjam || '').toLowerCase()}` === key || 
+        p.id === r.id || 
+        (p.id && r.id && p.id.replace(/[^0-9]/g, '') && p.id.replace(/[^0-9]/g, '') === r.id.replace(/[^0-9]/g, '')) ||
+        (p.skumPengeluaranId && (p.skumPengeluaranId === r.skumPengeluaranId || p.skumPengeluaranId === r.id)) ||
+        (r.skumPengeluaranId && (p.id.includes(r.skumPengeluaranId.replace(/[^a-zA-Z0-9]/g, '')) || p.skumPengeluaranId === r.skumPengeluaranId)) ||
+        (p.tanggal === r.tanggal && p.jumlah === r.jumlah)
+      );
+      if (existingIndex === -1) {
+        updatedPinjaman.push(r);
+      } else {
+        if ((!updatedPinjaman[existingIndex].nomorPerkara || updatedPinjaman[existingIndex].nomorPerkara === 'Kepaniteraan Umum') && r.nomorPerkara && r.nomorPerkara !== 'Kepaniteraan Umum') {
+          updatedPinjaman[existingIndex].nomorPerkara = r.nomorPerkara;
+        }
+        if (!updatedPinjaman[existingIndex].skumPengeluaranId && r.skumPengeluaranId) {
+          updatedPinjaman[existingIndex].skumPengeluaranId = r.skumPengeluaranId;
+        }
+      }
+    });
+
+    return {
+      syncedJurnal: sanitizeSkumRecords(updatedJurnal),
+      syncedPinjaman: updatedPinjaman
+    };
   };
 
   // Load Initial Data from Storage / Cache & merge with fresh public data / Google Sheet
@@ -280,12 +398,18 @@ export default function App() {
     const loadedNotifs = StorageService.getNotifications();
     const currentSyncSettings = StorageService.getSyncSettings();
 
-    const syncedLoadedCases = ensureUniqueCaseIds(updateCasesWithSkumLogs(loadedCases, loadedJurnalSkum));
+    // Harmonize loaded local pinjaman with loaded local jurnal
+    const { syncedJurnal: initialSyncedJurnal, syncedPinjaman: initialSyncedPinjaman } = synchronizePinjamanAndJurnal(
+      loadedJurnalSkum,
+      loadedPinjamanSkum
+    );
+
+    const syncedLoadedCases = ensureUniqueCaseIds(updateCasesWithSkumLogs(loadedCases, initialSyncedJurnal));
 
     setCases(syncedLoadedCases);
     setBiayaProsesRecords(loadedBiayaProses);
-    setJurnalSkumRecords(sortSkumRecords(loadedJurnalSkum));
-    setPinjamanSkumRecords(loadedPinjamanSkum);
+    setJurnalSkumRecords(sortSkumRecords(initialSyncedJurnal));
+    setPinjamanSkumRecords(initialSyncedPinjaman);
     setNotifications(loadedNotifs);
     setCacheMeta(StorageService.getCacheMeta());
 
@@ -316,7 +440,6 @@ export default function App() {
             );
 
             let finalWarna = remoteItem.warnaBaris || 'default';
-            // If remote has no specific color but local had one saved, keep the local color
             if (finalWarna === 'default' && localMatch && localMatch.warnaBaris && localMatch.warnaBaris !== 'default') {
               finalWarna = localMatch.warnaBaris;
             }
@@ -328,7 +451,16 @@ export default function App() {
           });
         }
 
-        const activeJurnal = sanitizeSkumRecords(mergedJurnal);
+        let combinedPinjaman = liveData.pinjamanSkum || [];
+
+        // Two-way synchronization between live Jurnal and live Pinjaman
+        const { syncedJurnal: finalSyncedJurnal, syncedPinjaman: finalSyncedPinjaman } = synchronizePinjamanAndJurnal(
+          mergedJurnal,
+          combinedPinjaman,
+          true
+        );
+
+        const activeJurnal = sanitizeSkumRecords(finalSyncedJurnal);
 
         if (fetchedCases.length > 0) {
           fetchedCases = updateCasesWithSkumLogs(fetchedCases, activeJurnal);
@@ -352,21 +484,8 @@ export default function App() {
           StorageService.saveJurnalSkumRecords(sortedJurnal);
         }
 
-        let combinedPinjaman = liveData.pinjamanSkum || [];
-        if (activeJurnal.length > 0) {
-          const reconstructedPinjaman = SyncService.reconstructPinjamanFromJurnal(activeJurnal);
-          if (reconstructedPinjaman.length > 0) {
-            const existingKeys = new Set(combinedPinjaman.map(p => `${p.tanggal}-${p.jumlah}-${(p.peminjam||'').toLowerCase()}`));
-            reconstructedPinjaman.forEach(r => {
-              const key = `${r.tanggal}-${r.jumlah}-${(r.peminjam||'').toLowerCase()}`;
-              if (!existingKeys.has(key)) {
-                combinedPinjaman.push(r);
-              }
-            });
-          }
-        }
-        setPinjamanSkumRecords(combinedPinjaman);
-        StorageService.savePinjamanSkumRecords(combinedPinjaman);
+        setPinjamanSkumRecords(finalSyncedPinjaman);
+        StorageService.savePinjamanSkumRecords(finalSyncedPinjaman);
 
         if (liveData.kasOpname) {
           StorageService.saveKasOpname(liveData.kasOpname);
@@ -813,6 +932,22 @@ export default function App() {
         }
       }
 
+      // Delete corresponding Pinjaman record if this was a loan or repayment
+      if (target.kategori === 'Pinjaman' || (target.uraian || '').toLowerCase().includes('pinjam') || (target.uraian || '').toLowerCase().includes('pelunasan') || (target.uraian || '').toLowerCase().includes('pengembalian')) {
+        const remainingPinjaman = pinjamanSkumRecords.filter(p => {
+          if (p.skumPengeluaranId === target.id || p.skumPengembalianId === target.id || p.id === target.id) return false;
+          const uLower = (target.uraian || '').toLowerCase();
+          const pLower = (p.peminjam || '').toLowerCase();
+          if (pLower && uLower.includes(pLower) && (p.jumlah === target.pengeluaran || p.jumlah === target.penerimaan)) {
+            return false;
+          }
+          return true;
+        });
+        if (remainingPinjaman.length !== pinjamanSkumRecords.length) {
+          updatePinjamanSkumState(remainingPinjaman);
+        }
+      }
+
       // Reupdate cases state based on updated SKUM logs
       const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
       updateCasesState(updatedCases);
@@ -963,6 +1098,159 @@ export default function App() {
     );
   };
 
+  const handleUpdatePinjamanSkum = (updatedPinjaman: PinjamanSkumRecord) => {
+    let existingIndex = pinjamanSkumRecords.findIndex(p => 
+      p.id === updatedPinjaman.id || 
+      (p.id && updatedPinjaman.id && p.id.replace(/[^0-9]/g, '') === updatedPinjaman.id.replace(/[^0-9]/g, '')) ||
+      (p.skumPengeluaranId && (p.skumPengeluaranId === updatedPinjaman.id || p.skumPengeluaranId === updatedPinjaman.skumPengeluaranId)) ||
+      (updatedPinjaman.skumPengeluaranId && p.id === updatedPinjaman.skumPengeluaranId) ||
+      (p.tanggal === updatedPinjaman.tanggal && p.jumlah === updatedPinjaman.jumlah && (p.peminjam || '').toLowerCase() === (updatedPinjaman.peminjam || '').toLowerCase())
+    );
+
+    const oldPinjaman = existingIndex !== -1 ? pinjamanSkumRecords[existingIndex] : updatedPinjaman;
+    const updatedList = [...pinjamanSkumRecords];
+    if (existingIndex !== -1) {
+      updatedList[existingIndex] = updatedPinjaman;
+    } else {
+      updatedList.push(updatedPinjaman);
+    }
+    updatePinjamanSkumState(updatedList);
+
+    // Update or sync JurnalBiayaSkumRecords accordingly
+    let updatedSkum = [...jurnalSkumRecords];
+
+    // 1. Update or create the loan disbursement (pengeluaran) record in Jurnal SKUM
+    let pengeluaranIndex = updatedSkum.findIndex(s => 
+      (updatedPinjaman.skumPengeluaranId && s.id === updatedPinjaman.skumPengeluaranId) ||
+      s.id === updatedPinjaman.id ||
+      (oldPinjaman.skumPengeluaranId && s.id === oldPinjaman.skumPengeluaranId) ||
+      (s.kategori === 'Pinjaman' && s.pengeluaran === oldPinjaman.jumlah && (s.uraian || '').toLowerCase().includes((oldPinjaman.peminjam || '').toLowerCase()))
+    );
+
+    if (pengeluaranIndex !== -1) {
+      updatedSkum[pengeluaranIndex] = {
+        ...updatedSkum[pengeluaranIndex],
+        tanggal: updatedPinjaman.tanggal,
+        nomorPerkara: updatedPinjaman.nomorPerkara || 'Kepaniteraan Umum',
+        uraian: `Peminjaman Saldo SKUM: ${updatedPinjaman.peminjam}`,
+        pengeluaran: updatedPinjaman.jumlah,
+        keterangan: `Peminjaman Saldo SKUM Kepaniteraan (${updatedPinjaman.keterangan || (updatedPinjaman.status === 'SUDAH_DIBAYAR' ? 'Lunas' : 'Belum Dibayar')}) [WARNA:oranye]`,
+        warnaBaris: 'oranye'
+      };
+    } else if (updatedPinjaman.jumlah > 0) {
+      const disbursementId = updatedPinjaman.skumPengeluaranId || `skum-pinjam-${updatedPinjaman.id || Date.now()}`;
+      updatedPinjaman.skumPengeluaranId = disbursementId;
+      const newDisbursement: JurnalBiayaSkumRecord = {
+        id: disbursementId,
+        tanggal: updatedPinjaman.tanggal || new Date().toISOString().split('T')[0],
+        nomorPerkara: updatedPinjaman.nomorPerkara || 'Kepaniteraan Umum',
+        uraian: `Peminjaman Saldo SKUM: ${updatedPinjaman.peminjam}`,
+        penerimaan: 0,
+        pengeluaran: updatedPinjaman.jumlah,
+        kategori: 'Pinjaman',
+        keterangan: `Peminjaman Saldo SKUM Kepaniteraan (${updatedPinjaman.keterangan || 'Belum Dibayar'}) [WARNA:oranye]`,
+        warnaBaris: 'oranye',
+        createdAt: new Date().toISOString()
+      };
+      updatedSkum = [newDisbursement, ...updatedSkum];
+      pengeluaranIndex = 0;
+    }
+
+    // 2. Handle repayment (penerimaan debet) record in Jurnal SKUM based on status change
+    let deletedRepaymentId: string | null = null;
+    if (updatedPinjaman.status === 'SUDAH_DIBAYAR') {
+      const today = updatedPinjaman.tanggalBayar || new Date().toISOString().split('T')[0];
+      const kembaliIndex = updatedSkum.findIndex(s => 
+        (updatedPinjaman.skumPengembalianId && s.id === updatedPinjaman.skumPengembalianId) ||
+        (s.kategori === 'Pinjaman' && s.penerimaan > 0 && (s.uraian || '').toLowerCase().includes((oldPinjaman.peminjam || '').toLowerCase()))
+      );
+
+      if (kembaliIndex !== -1) {
+        // Update existing repayment record
+        updatedSkum[kembaliIndex] = {
+          ...updatedSkum[kembaliIndex],
+          tanggal: today,
+          nomorPerkara: updatedPinjaman.nomorPerkara,
+          uraian: `Pengembalian Pinjaman Saldo SKUM: ${updatedPinjaman.peminjam}`,
+          penerimaan: updatedPinjaman.jumlah,
+          keterangan: `Pelunasan Peminjaman Saldo SKUM Kepaniteraan (Tanggal Bayar: ${today}) [WARNA:hijau]`,
+          warnaBaris: 'hijau'
+        };
+      } else {
+        // Create new repayment debet record to balance the loan out
+        const skumKembaliId = updatedPinjaman.skumPengembalianId || `skum-kembali-${Date.now()}`;
+        updatedPinjaman.skumPengembalianId = skumKembaliId;
+        const newSkumRecord: JurnalBiayaSkumRecord = {
+          id: skumKembaliId,
+          tanggal: today,
+          nomorPerkara: updatedPinjaman.nomorPerkara,
+          uraian: `Pengembalian Pinjaman Saldo SKUM: ${updatedPinjaman.peminjam}`,
+          penerimaan: updatedPinjaman.jumlah,
+          pengeluaran: 0,
+          kategori: 'Pinjaman',
+          keterangan: `Pelunasan Peminjaman Saldo SKUM Kepaniteraan (Tanggal Bayar: ${today}) [WARNA:hijau]`,
+          warnaBaris: 'hijau',
+          createdAt: new Date().toISOString()
+        };
+        updatedSkum = [newSkumRecord, ...updatedSkum];
+      }
+    } else if (updatedPinjaman.status === 'BELUM_DIBAYAR') {
+      // If status reverted to BELUM_DIBAYAR, remove any repayment record so it's not marked as returned debet
+      if (updatedPinjaman.skumPengembalianId || oldPinjaman.skumPengembalianId) {
+        deletedRepaymentId = updatedPinjaman.skumPengembalianId || oldPinjaman.skumPengembalianId || null;
+      }
+      updatedSkum = updatedSkum.filter(s => {
+        if (updatedPinjaman.skumPengembalianId && s.id === updatedPinjaman.skumPengembalianId) return false;
+        if (oldPinjaman.skumPengembalianId && s.id === oldPinjaman.skumPengembalianId) return false;
+        if (s.kategori === 'Pinjaman' && s.penerimaan === oldPinjaman.jumlah && (s.uraian || '').toLowerCase().includes((oldPinjaman.peminjam || '').toLowerCase())) return false;
+        return true;
+      });
+      delete updatedPinjaman.tanggalBayar;
+      delete updatedPinjaman.skumPengembalianId;
+    }
+
+    updateJurnalSkumState(updatedSkum);
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    updateCasesState(updatedCases);
+
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      const isLunas = updatedPinjaman.status === 'SUDAH_DIBAYAR';
+      SyncService.postToWebhook(webhook, 'update_pinjaman_skum', {
+        ...updatedPinjaman,
+        jumlahRp: updatedPinjaman.jumlah,
+        status: isLunas ? 'SUDAH_DIBAYAR' : 'BELUM_DIBAYAR',
+        statusLunas: isLunas ? 'Lunas' : 'Belum Lunas',
+        tanggalLunas: isLunas ? (updatedPinjaman.tanggalBayar || '') : '',
+        tanggalBayar: isLunas ? (updatedPinjaman.tanggalBayar || '') : ''
+      });
+      const activePengeluaran = updatedSkum.find(s => s.id === updatedPinjaman.skumPengeluaranId || s.id === updatedPinjaman.id);
+      if (activePengeluaran) {
+        SyncService.postToWebhook(webhook, 'update_jurnal_skum', activePengeluaran);
+      }
+      if (deletedRepaymentId) {
+        SyncService.postToWebhook(webhook, 'delete_jurnal_skum', { id: deletedRepaymentId });
+      }
+      const targetCase = updatedCases.find(c => {
+        if (!c.nomorPerkara) return false;
+        const normC = c.nomorPerkara.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normP = (updatedPinjaman.nomorPerkara || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normKet = (updatedPinjaman.keterangan || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        return (normP.length > 0 && normC === normP) || (normKet.length > 0 && normKet.includes(normC));
+      });
+      if (targetCase) {
+        SyncService.postToWebhook(webhook, 'update_case', targetCase);
+      }
+    }
+
+    addNotification(
+      'Data Pinjaman Diperbarui',
+      `Data pinjaman ${updatedPinjaman.peminjam} (Rp ${updatedPinjaman.jumlah.toLocaleString('id-ID')}) status ${updatedPinjaman.status === 'SUDAH_DIBAYAR' ? 'LUNAS' : 'BELUM LUNAS'} berhasil diperbarui dan disinkronkan ke Spreadsheet.`,
+      'success',
+      updatedPinjaman.nomorPerkara
+    );
+  };
+
   const handleDeletePinjamanSkum = (pinjamanId: string) => {
     const target = pinjamanSkumRecords.find(p => p.id === pinjamanId);
     if (!target) return;
@@ -970,9 +1258,25 @@ export default function App() {
     const updatedPinjaman = pinjamanSkumRecords.filter(p => p.id !== pinjamanId);
     updatePinjamanSkumState(updatedPinjaman);
 
-    const updatedSkum = jurnalSkumRecords.filter(s => 
-      s.id !== target.skumPengeluaranId && s.id !== target.skumPengembalianId
-    );
+    const updatedSkum = jurnalSkumRecords.filter(s => {
+      if (target.skumPengeluaranId && s.id === target.skumPengeluaranId) return false;
+      if (target.skumPengembalianId && s.id === target.skumPengembalianId) return false;
+      if (s.id === target.id) return false;
+      
+      const sIdNorm = s.id.replace(/[^a-zA-Z0-9]/g, '');
+      const tIdNorm = target.id.replace('pinjam-', '').replace(/[^a-zA-Z0-9]/g, '');
+      if (tIdNorm && sIdNorm.includes(tIdNorm)) return false;
+
+      const uLower = (s.uraian || '').toLowerCase();
+      const pLower = (target.peminjam || '').toLowerCase();
+      const isPinjamUraian = s.kategori === 'Pinjaman' || uLower.includes('pinjam') || uLower.includes('pengembalian');
+      if (isPinjamUraian && pLower && uLower.includes(pLower)) {
+        if ((s.pengeluaran === target.jumlah) || (s.penerimaan === target.jumlah)) {
+          return false;
+        }
+      }
+      return true;
+    });
     updateJurnalSkumState(updatedSkum);
 
     const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
@@ -1337,6 +1641,7 @@ export default function App() {
               setIsJurnalModalOpen(true);
             }}
             onAddPinjaman={handleAddPinjamanSkum}
+            onUpdatePinjaman={handleUpdatePinjamanSkum}
             onBayarPinjaman={handleBayarPinjamanSkum}
             onDeletePinjaman={handleDeletePinjamanSkum}
             onSyncAllColorsToCloud={handleSyncAllColorsToCloud}
