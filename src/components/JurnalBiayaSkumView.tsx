@@ -738,10 +738,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
   }, [records, effectiveBiayaKasBelumDisetor, effectiveUnpaidLoanAmount, auditKasFisikInput]);
 
   // Saldo Sesungguhnya (Kas Riil Fisik di Kasir):
-  // Rumus: Saldo Perkara SKUM + Biaya Kas Belum Disetor + Pinjaman Saldo SKUM Kepaniteraan
-  // Logika: Kas fisik riil adalah sisa panjar perkara ditambah biaya kas yang belum disetor keluar kasir.
-  // Nilai ini otomatis LEBIH BESAR daripada biaya yang akan disetor (karena ditambah sisa saldo perkara SKUM).
+  // Rumus: Saldo Perkara SKUM + Biaya Kas Belum Disetor + Pinjaman/Bon Saldo SKUM Kepaniteraan
+  // Logika: Kas fisik riil adalah sisa panjar perkara ditambah biaya kas yang belum disetor keluar kasir + bon/pinjaman yang dipegang dalam bentuk bukti kwitansi.
   const saldoSesungguhnya = saldoSkum + effectiveBiayaKasBelumDisetor + effectiveUnpaidLoanAmount;
+
+  // Saldo Kasir Riil Murni di Laci / Tanpa Bon (Uang fisik tunai kasir saat bon masih dipinjam/belum kembali)
+  const saldoKasirTanpaBon = uangTunaiSeharusnyaDiLaci;
+
+  // Posisi Saldo Kasir Setelah Bayar Bon (Ketika seluruh bon/pinjaman dilunasi & dikembalikan ke kas):
+  // - Piutang bon menjadi 0 (Lunas)
+  // - Uang kas fisik di laci bertambah utuh menjadi saldoFisikStandarBuku (+Rp effectiveUnpaidLoanAmount)
+  // - Saldo buku SKUM kembali naik normal (+Rp effectiveUnpaidLoanAmount)
+  const saldoSetelahBayarBon = saldoFisikStandarBuku;
+  const saldoBukuSetelahBayarBon = saldoSkum + effectiveUnpaidLoanAmount;
 
   // Biaya yang telah keluar/disetorkan secara riil dari kasir
   const biayaKasKeluarDisetor = Math.max(0, totalKredit - effectiveBiayaKasBelumDisetor);
@@ -859,17 +868,29 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             </tr>
             <tr style="background-color: #f5f5f5;">
               <td class="text-center font-bold">A</td>
-              <td class="font-bold">TOTAL KAS FISIK SEHARUSNYA (MENURUT BUKU STANDAR)</td>
+              <td class="font-bold">TOTAL KAS FISIK SEHARUSNYA (STANDAR PEMBUKUAN)</td>
               <td class="text-right font-bold" style="font-size: 11pt;">Rp ${saldoFisikStandarBuku.toLocaleString('id-ID')}</td>
             </tr>
+            ${effectiveUnpaidLoanAmount > 0 ? `
+              <tr style="background-color: #fff1f2;">
+                <td class="text-center font-bold">B</td>
+                <td>Bon / Pinjaman Operasional Belum Lunas (Kwitansi Sementara)</td>
+                <td class="text-right font-bold text-rose-700">- Rp ${effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</td>
+              </tr>
+              <tr style="background-color: #ecfdf5;">
+                <td class="text-center font-bold">C</td>
+                <td class="font-bold">UANG TUNAI WAJIB ADA DI LACI KASIR (POSISI TANPA BON = A - B)</td>
+                <td class="text-right font-bold" style="font-size: 11pt;">Rp ${uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}</td>
+              </tr>
+            ` : ''}
             <tr style="background-color: #eef2ff;">
-              <td class="text-center font-bold">B</td>
+              <td class="text-center font-bold">${effectiveUnpaidLoanAmount > 0 ? 'D' : 'B'}</td>
               <td class="font-bold">HASIL PERHITUNGAN FISIK UANG DI KASIR (AKTUAL KAS OPNAME)</td>
               <td class="text-right font-bold" style="font-size: 11pt;">Rp ${auditKasFisikInput.toLocaleString('id-ID')}</td>
             </tr>
             <tr style="background-color: ${selisihAuditKasir === 0 ? '#ecfdf5' : '#fef2f2'};">
-              <td class="text-center font-bold">C</td>
-              <td class="font-bold">SELISIH KAS OPNAME (B - A)</td>
+              <td class="text-center font-bold">${effectiveUnpaidLoanAmount > 0 ? 'E' : 'C'}</td>
+              <td class="font-bold">SELISIH KAS OPNAME (${effectiveUnpaidLoanAmount > 0 ? 'D - C' : 'B - A'})</td>
               <td class="text-right font-bold" style="font-size: 11pt;">
                 ${selisihAuditKasir >= 0 ? `+ Rp ${selisihAuditKasir.toLocaleString('id-ID')}` : `- Rp ${Math.abs(selisihAuditKasir).toLocaleString('id-ID')}`}
                 (${selisihAuditKasir === 0 ? 'SEIMBANG / PAS' : selisihAuditKasir > 0 ? 'SURPLUS FISIK' : 'DEFISIT FISIK'})
@@ -877,6 +898,14 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             </tr>
           </tbody>
         </table>
+
+        ${effectiveUnpaidLoanAmount > 0 ? `
+          <div style="border: 1px solid #f59e0b; background: #fffbeb; padding: 8px 12px; margin: 10px 0; font-size: 9.5pt; border-radius: 4px;">
+            <strong>Informasi Komparasi Bon / Pinjaman Operasional:</strong><br/>
+            • Posisi Saat Ini (Tanpa Bon Lunas): Uang kas fisik di laci = Rp ${uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')} + Kwitansi Bon Rp ${effectiveUnpaidLoanAmount.toLocaleString('id-ID')} = Total Saldo Sesungguhnya Rp ${saldoSesungguhnya.toLocaleString('id-ID')}.<br/>
+            • Posisi Setelah Bayar Bon (Kas Utuh): Seluruh uang kembali ke laci kasir menjadi Rp ${saldoSetelahBayarBon.toLocaleString('id-ID')} dan saldo buku SKUM pulih normal menjadi Rp ${saldoBukuSetelahBayarBon.toLocaleString('id-ID')}.
+          </div>
+        ` : ''}
 
         ${hasDenom ? `
           <h4 style="margin: 12px 0 4px 0; font-size: 10pt;">Rincian Pecahan Fisik Uang Kasir (Denominasi):</h4>
@@ -1646,7 +1675,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           className={`p-3.5 rounded-2xl border shadow-sm cursor-pointer transition-all hover:border-emerald-500 hover:shadow-md active:scale-98 relative group flex flex-col justify-between ${
             isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-800 text-slate-100'
           }`}
-          title="Klik untuk membuka Diagnostik & Investigasi Kas Opname Kasir & Rekonsiliasi"
+          title="Klik untuk membuka Rekonsiliasi Saldo Sesungguhnya & Debet SKUM beserta komparasi Bon Pinjaman"
         >
           <div>
             <div className="flex items-center justify-between mb-1.5">
@@ -1673,8 +1702,29 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               </div>
             </div>
 
+            {/* Perbandingan Tanpa Bon vs Setelah Bayar Bon */}
+            <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800 space-y-0.5 text-[9px]">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Kas Laci (Tanpa Bon):</span>
+                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                  Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}
+                </span>
+              </div>
+              {effectiveUnpaidLoanAmount > 0 ? (
+                <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                  <span>+ Bon Belum Lunas:</span>
+                  <span className="font-mono font-bold">Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
+                  <span>Status Bon:</span>
+                  <span className="font-bold">✓ Semua Lunas</span>
+                </div>
+              )}
+            </div>
+
             {/* Sub-info: Fisik Kasir & Selisih */}
-            <div className="mt-1 flex items-center justify-between text-[9px]">
+            <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-[9px]">
               <span className="text-slate-500 dark:text-slate-400">
                 Fisik: <strong className="font-mono text-slate-800 dark:text-slate-200">Rp {auditKasFisikInput.toLocaleString('id-ID')}</strong>
               </span>
@@ -1687,7 +1737,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
           </div>
 
           <div className="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold group-hover:underline">
-            <span>🔍 Diagnostik Kasir</span>
+            <span>🔍 Rekonsiliasi & Komparasi Bon</span>
             <ArrowRight className="w-2.5 h-2.5" />
           </div>
         </div>
@@ -3789,6 +3839,204 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                     Dan jika sebagian telah disetor resmi (Rp {biayaKasKeluarDisetor.toLocaleString('id-ID')}), 
                     total saldo sesungguhnya ditambah yang telah disetor tepat sama dengan total penerimaan panjar SKUM.
                   </p>
+                </div>
+              </div>
+
+              {/* Komparasi Logika Rekonsiliasi: Posisi Tanpa/Sebelum Bayar Bon vs Posisi Setelah Bayar Bon */}
+              <div className="p-4 rounded-2xl border bg-gradient-to-br from-amber-50/70 via-orange-50/40 to-emerald-50/60 dark:from-amber-950/30 dark:via-slate-900/60 dark:to-emerald-950/30 border-amber-300 dark:border-amber-800 shadow-sm space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-amber-200 dark:border-amber-800/80">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-1.5 rounded-lg bg-amber-500 text-white shadow-xs">
+                      <Scale className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-amber-950 dark:text-amber-200 text-xs sm:text-sm flex items-center gap-1.5">
+                        <span>Komparasi Logika Rekonsiliasi: Bon / Pinjaman Operasional</span>
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Perbandingan kas riil di laci saat bon belum lunas vs saat bon telah dibayar / dikembalikan
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                      Total Bon: Rp {(totalUnpaidAmount + totalPaidAmount).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Dua Kotak Komparasi Berdampingan */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Kotak A: Sebelum Bayar Bon / Posisi Ada Bon Berjalan */}
+                  <div className="p-3.5 rounded-xl border bg-white dark:bg-slate-900 border-amber-300 dark:border-amber-800/80 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-amber-100 dark:border-amber-900/40">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                        <span className="font-extrabold text-amber-950 dark:text-amber-200 text-xs">
+                          1. Posisi Tanpa / Sebelum Bayar Bon
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
+                        {unpaidLoans.length > 0 ? `${unpaidLoans.length} Bon Belum Lunas` : '0 Bon Aktif'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 dark:text-slate-400">Uang Tunai Murni di Laci (Tanpa Bon):</span>
+                        <span className="font-mono font-black text-slate-900 dark:text-white">
+                          Rp {uangTunaiSeharusnyaDiLaci.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                        <span>+ Piutang Kwitansi Bon Belum Lunas:</span>
+                        <span className="font-mono font-bold">
+                          + Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between font-bold text-emerald-700 dark:text-emerald-300">
+                        <span>= Total Saldo Sesungguhnya:</span>
+                        <span className="font-mono font-black">
+                          Rp {saldoSesungguhnya.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                        <span>Saldo Buku SKUM Tercatat:</span>
+                        <span className={`font-mono font-bold ${saldoSkum < 0 ? 'text-rose-600' : 'text-slate-700 dark:text-slate-300'}`}>
+                          Rp {saldoSkum.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-[9.5px] text-slate-500 dark:text-slate-400 leading-normal bg-amber-50/50 dark:bg-amber-950/20 p-2 rounded-lg border border-amber-200/50 dark:border-amber-800/40">
+                      💡 <strong>Logika:</strong> Uang kas di laci kasir berkurang <strong>Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}</strong> karena dipinjam sementara untuk operasional. Nilai ini dipertanggungjawabkan dalam bentuk kwitansi bon.
+                    </p>
+                  </div>
+
+                  {/* Kotak B: Setelah Bayar Bon / Pelunasan Kasir */}
+                  <div className="p-3.5 rounded-xl border bg-white dark:bg-slate-900 border-emerald-300 dark:border-emerald-800/80 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-emerald-100 dark:border-emerald-900/40">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                        <span className="font-extrabold text-emerald-950 dark:text-emerald-200 text-xs">
+                          2. Posisi Setelah Bayar Bon (Kas Utuh)
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
+                        ✓ Kasir 100% Pulih
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-300">
+                        <span className="font-semibold">Uang Tunai di Laci Kasir (Pulih Utuh):</span>
+                        <span className="font-mono font-black text-sm">
+                          Rp {saldoSetelahBayarBon.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                        <span>Sisa Piutang Bon (Lunas 100%):</span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          Rp 0 (Lunas)
+                        </span>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between font-bold text-emerald-700 dark:text-emerald-300">
+                        <span>= Total Saldo Sesungguhnya:</span>
+                        <span className="font-mono font-black">
+                          Rp {saldoSesungguhnya.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                        <span>Saldo Buku SKUM Pulih Normal:</span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                          Rp {saldoBukuSetelahBayarBon.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-[9.5px] text-emerald-800 dark:text-emerald-300 leading-normal bg-emerald-50/50 dark:bg-emerald-950/20 p-2 rounded-lg border border-emerald-200/50 dark:border-emerald-800/40">
+                      ✓ <strong>Hasil Pelunasan:</strong> Setelah bon dilunasi, uang tunai kasir bertambah kembali (+Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')}) dan dicatat sebagai Debet Pengembalian Pinjaman, sehingga saldo buku kembali normal.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Panel Status Riwayat Pembayaran Bon */}
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/80 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
+                      <HandCoins className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Status Rincian Bon / Pinjaman Operasional:</span>
+                    </span>
+                    <div className="flex items-center space-x-2 text-[10px]">
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
+                        Sudah Lunas: Rp {totalPaidAmount.toLocaleString('id-ID')} ({paidLoans.length})
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 font-bold">
+                        Belum Lunas: Rp {totalUnpaidAmount.toLocaleString('id-ID')} ({unpaidLoans.length})
+                      </span>
+                    </div>
+                  </div>
+
+                  {unpaidLoans.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold">
+                        Daftar Bon Yang Masih Berjalan (Belum Dilunasi):
+                      </div>
+                      <div className="divide-y divide-slate-200 dark:divide-slate-700/60 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900">
+                        {unpaidLoans.map(p => (
+                          <div key={p.id} className="p-2 flex flex-wrap items-center justify-between gap-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <div>
+                              <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                <span>{p.peminjam || 'Peminjam'}</span>
+                                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                                  {p.nomorPerkara || '-'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400">{p.keterangan || 'Pinjaman Operasional'}</p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                                Rp {(p.jumlah || 0).toLocaleString('id-ID')}
+                              </span>
+                              {onBayarPinjaman && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (confirm(`Lunaskan bon pinjaman Rp ${(p.jumlah || 0).toLocaleString('id-ID')} untuk ${p.peminjam}? Ini akan mengembalikan uang tunai ke kasir.`)) {
+                                      onBayarPinjaman(p.id);
+                                    }
+                                  }}
+                                  className="px-2 py-1 rounded-md text-[10px] font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xs transition-all active:scale-95 cursor-pointer flex items-center space-x-1"
+                                  title="Klik untuk melunasi bon ini sekarang"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>Lunaskan</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-2 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-[10px] font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Semua bon operasional telah lunas dibayar. Kas kasir saat ini berada pada kondisi kas utuh tanpa piutang berjalan.</span>
+                    </div>
+                  )}
+
+                  {paidLoans.length > 0 && (
+                    <div className="pt-1 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                      <span>Riwayat Bon Lunas: <strong>{paidLoans.length} transaksi</strong> telah dikembalikan ke kasir.</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">Total Lunas: Rp {totalPaidAmount.toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
