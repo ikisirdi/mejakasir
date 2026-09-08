@@ -406,8 +406,15 @@ export default function App() {
 
     const syncedLoadedCases = ensureUniqueCaseIds(updateCasesWithSkumLogs(loadedCases, initialSyncedJurnal));
 
+    // Reconcile loaded local Biaya Proses with loaded local Jurnal SKUM (ensuring records like ATK 2/Pdt.G/2026/PA.Pan are recorded)
+    const { reconciled: initialReconciledBp } = SyncService.reconcileBiayaProsesWithSkum(
+      loadedBiayaProses,
+      initialSyncedJurnal
+    );
+
     setCases(syncedLoadedCases);
-    setBiayaProsesRecords(loadedBiayaProses);
+    setBiayaProsesRecords(initialReconciledBp);
+    StorageService.saveBiayaProsesRecords(initialReconciledBp);
     setJurnalSkumRecords(sortSkumRecords(initialSyncedJurnal));
     setPinjamanSkumRecords(initialSyncedPinjaman);
     setNotifications(loadedNotifs);
@@ -473,9 +480,23 @@ export default function App() {
           StorageService.saveCases(syncedLoaded);
         }
 
-        if (liveData.biayaProses.length > 0) {
-          setBiayaProsesRecords(liveData.biayaProses);
-          StorageService.saveBiayaProsesRecords(liveData.biayaProses);
+        const effectiveRemoteBiaya = (liveData.biayaProses && liveData.biayaProses.length > 0)
+          ? liveData.biayaProses
+          : (initialReconciledBp.length > 0 ? initialReconciledBp : loadedBiayaProses);
+
+        const { reconciled: finalReconciledBp, addedRecords: newBpFromSkum } = SyncService.reconcileBiayaProsesWithSkum(
+          effectiveRemoteBiaya,
+          activeJurnal
+        );
+
+        setBiayaProsesRecords(finalReconciledBp);
+        StorageService.saveBiayaProsesRecords(finalReconciledBp);
+
+        const currentWebhook = getWebhookUrl(currentSyncSettings);
+        if (currentWebhook && newBpFromSkum.length > 0) {
+          newBpFromSkum.forEach(rec => {
+            SyncService.postToWebhook(currentWebhook, 'add_biaya_proses', rec);
+          });
         }
 
         if (activeJurnal.length > 0) {
@@ -767,6 +788,34 @@ export default function App() {
     );
   };
 
+  // Reconcile ATK deductions from Jurnal SKUM to Buku Bantu Biaya Proses
+  const handleReconcileBiayaProsesFromSkum = () => {
+    const { reconciled, addedCount, addedRecords } = SyncService.reconcileBiayaProsesWithSkum(
+      biayaProsesRecords,
+      jurnalSkumRecords
+    );
+    if (addedCount > 0) {
+      updateBiayaProsesState(reconciled);
+      const webhook = getWebhookUrl(syncSettings);
+      if (webhook) {
+        addedRecords.forEach(rec => {
+          SyncService.postToWebhook(webhook, 'add_biaya_proses', rec);
+        });
+      }
+      addNotification(
+        'Sinkronisasi Jurnal SKUM ke Biaya Proses',
+        `Berhasil menyinkronkan ${addedCount} data potongan ATK perkara dari Jurnal SKUM ke Buku Bantu Biaya Proses.`,
+        'success'
+      );
+    } else {
+      addNotification(
+        'Buku Bantu Biaya Proses Lengkap',
+        'Seluruh potongan ATK perkara dari Jurnal SKUM sudah tercatat dengan rapi di Buku Bantu Biaya Proses.',
+        'info'
+      );
+    }
+  };
+
   // Handlers for Jurnal Biaya SKUM
   const handleAddJurnalSkumRecord = (record: Omit<JurnalBiayaSkumRecord, 'id' | 'createdAt'>) => {
     // Determine whether transaction is Debet (Penerimaan Panjar) or Kredit (Pengeluaran Biaya Perkara)
@@ -798,6 +847,32 @@ export default function App() {
       const targetCase = updatedCases.find(c => c.nomorPerkara && c.nomorPerkara.trim().toLowerCase() === newRecord.nomorPerkara.trim().toLowerCase());
       if (targetCase) {
         SyncService.postToWebhook(webhook, 'update_case', targetCase);
+      }
+    }
+
+    // If the added SKUM record is an ATK / Biaya Pemberkasan deduction, also record to Buku Bantu Biaya Proses
+    if (
+      (newRecord.kategori === 'ATK' || (newRecord.uraian && /pemberkasan|atk/i.test(newRecord.uraian))) &&
+      (Number(newRecord.pengeluaran) || 0) > 0 &&
+      newRecord.nomorPerkara &&
+      newRecord.nomorPerkara !== '-' &&
+      !newRecord.nomorPerkara.toLowerCase().includes('kepaniteraan')
+    ) {
+      const bpRec: BiayaProsesRecord = {
+        id: `bp-atk-${newRecord.id.replace(/^skum-/, '')}`,
+        tanggal: newRecord.tanggal,
+        nomorPerkara: newRecord.nomorPerkara.trim(),
+        uraian: newRecord.uraian || 'Pencatatan Jurnal: Biaya Pemberkasan / ATK',
+        penerimaan: Number(newRecord.pengeluaran) || 0,
+        pengeluaran: 0,
+        kategori: 'ATK',
+        keterangan: 'Pemotongan Panjar ATK Perkara (Buku Bantu)',
+        createdAt: newRecord.createdAt
+      };
+      const updatedBp = [bpRec, ...biayaProsesRecords];
+      updateBiayaProsesState(updatedBp);
+      if (webhook) {
+        SyncService.postToWebhook(webhook, 'add_biaya_proses', bpRec);
       }
     }
 
@@ -1660,6 +1735,8 @@ export default function App() {
             onSyncSpreadsheet={() => loadDataFromSource(true)}
             syncSettings={syncSettings}
             theme={theme}
+            jurnalSkumRecords={jurnalSkumRecords}
+            onReconcileFromSkum={handleReconcileBiayaProsesFromSkum}
           />
         ) : (
           <CaseTable

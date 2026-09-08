@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { BiayaProsesRecord, CaseRecord } from '../types';
+import { BiayaProsesRecord, CaseRecord, JurnalBiayaSkumRecord, SyncSettings } from '../types';
 import { Lipa7aReportModal } from './Lipa7aReportModal';
 import { 
   Printer, 
@@ -25,9 +25,9 @@ import {
   CheckCircle,
   Clock,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  ArrowLeftRight
 } from 'lucide-react';
-import { SyncSettings } from '../types';
 
 interface BukuBiayaProsesProps {
   records: BiayaProsesRecord[];
@@ -40,6 +40,8 @@ interface BukuBiayaProsesProps {
   onSyncSpreadsheet?: () => void;
   syncSettings?: SyncSettings;
   theme?: 'light' | 'dark';
+  jurnalSkumRecords?: JurnalBiayaSkumRecord[];
+  onReconcileFromSkum?: () => void;
 }
 
 export const MONTH_NAMES = [
@@ -74,7 +76,9 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
   onZeroOutCaseBalance,
   onSyncSpreadsheet,
   syncSettings,
-  theme = 'light'
+  theme = 'light',
+  jurnalSkumRecords = [],
+  onReconcileFromSkum
 }) => {
   const isLight = theme === 'light';
 
@@ -302,22 +306,55 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
     setIsZeroingModalOpen(false);
   };
 
+  // Check for any unrecorded ATK items from Jurnal SKUM
+  const unreconciledSkumItems = useMemo(() => {
+    if (!jurnalSkumRecords || jurnalSkumRecords.length === 0) return [];
+    const atkItems = jurnalSkumRecords.filter(s => {
+      const no = (s.nomorPerkara || '').trim();
+      if (!no || no === '-' || no.toLowerCase().includes('kepaniteraan')) return false;
+      const pengeluaran = Number(s.pengeluaran) || 0;
+      if (pengeluaran <= 0) return false;
+      const kat = (s.kategori || '').toLowerCase();
+      const u = (s.uraian || '').toLowerCase();
+      return kat === 'atk' || u.includes('atk') || u.includes('pemberkasan') || u.includes('biaya proses');
+    });
+
+    return atkItems.filter(skum => {
+      const normSkumNo = (skum.nomorPerkara || '').trim().toLowerCase().replace(/\s+/g, '');
+      const skumAmount = Number(skum.pengeluaran) || 0;
+      const hasMatch = records.some(b => {
+        const normBpNo = (b.nomorPerkara || '').trim().toLowerCase().replace(/\s+/g, '');
+        if (normBpNo !== normSkumNo) return false;
+        if (b.id === `bp-atk-${skum.id}` || b.id === skum.id || b.id.includes(skum.id)) return true;
+        const skumTs = (skum.id.match(/\d{12,}/) || [])[0];
+        const bpTs = (b.id.match(/\d{12,}/) || [])[0];
+        if (skumTs && bpTs && skumTs === bpTs) return true;
+        if (Number(b.penerimaan) === skumAmount) return true;
+        return false;
+      });
+      return !hasMatch;
+    });
+  }, [jurnalSkumRecords, records]);
+
   // Filter records by Month & Year & Search
   const filteredRecords = useMemo(() => {
+    const q = (searchQuery || '').trim().toLowerCase();
+
     return records.filter(item => {
       const [yr, mo] = item.tanggal.split('-');
       const monthIdx = parseInt(mo, 10) - 1;
       const monthName = MONTH_NAMES[monthIdx];
 
       if (selectedYear !== 'ALL' && yr !== selectedYear) return false;
-      if (selectedMonth !== 'ALL' && monthName !== selectedMonth) return false;
 
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+      // When search query is entered, match across all months for quick finding
+      if (q) {
         const matchNo = item.nomorPerkara.toLowerCase().includes(q);
         const matchUraian = item.uraian.toLowerCase().includes(q);
         const matchKet = (item.keterangan || '').toLowerCase().includes(q);
         if (!matchNo && !matchUraian && !matchKet) return false;
+      } else {
+        if (selectedMonth !== 'ALL' && monthName !== selectedMonth) return false;
       }
 
       return true;
@@ -497,6 +534,30 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {/* Reconcile from Jurnal SKUM */}
+          {onReconcileFromSkum && (
+            <button
+              id="sync-jurnal-skum-to-buku-btn"
+              onClick={onReconcileFromSkum}
+              className={`flex items-center space-x-1.5 px-3 py-2 border rounded-xl text-xs font-bold transition-all ${
+                unreconciledSkumItems.length > 0
+                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md ring-2 ring-amber-400 animate-pulse'
+                  : isLight
+                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-amber-800/60'
+              }`}
+              title="Sinkronkan potongan ATK / Biaya Pemberkasan dari Jurnal SKUM ke Buku Bantu Biaya Proses"
+            >
+              <ArrowLeftRight className="w-4 h-4 text-amber-500" />
+              <span>Sinkron Jurnal SKUM</span>
+              {unreconciledSkumItems.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-600 text-white font-extrabold">
+                  {unreconciledSkumItems.length}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Sync / Force Reload Button */}
           {onSyncSpreadsheet && (
             <button
@@ -550,6 +611,34 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
           </button>
         </div>
       </div>
+
+      {/* UNRECONCILED SKUM ATK ALERT BANNER */}
+      {unreconciledSkumItems.length > 0 && (
+        <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-sm transition-colors ${
+          isLight ? 'bg-amber-50/95 border-amber-300 text-amber-950' : 'bg-amber-950/40 border-amber-700/80 text-amber-200'
+        }`}>
+          <div className="flex items-start sm:items-center space-x-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            <div>
+              <p className="font-bold text-xs sm:text-sm">
+                Terdeteksi {unreconciledSkumItems.length} Potongan ATK di Jurnal SKUM Belum Masuk Buku Bantu Biaya Proses
+              </p>
+              <p className="text-[11px] opacity-90 mt-0.5">
+                Terdapat transaksi pemotongan panjar ATK di Jurnal SKUM (seperti perkara <strong>{unreconciledSkumItems[0]?.nomorPerkara}</strong> - {unreconciledSkumItems[0]?.uraian}) yang belum dicatat di Buku Bantu.
+              </p>
+            </div>
+          </div>
+          {onReconcileFromSkum && (
+            <button
+              onClick={onReconcileFromSkum}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shrink-0 transition-all shadow-sm flex items-center space-x-2"
+            >
+              <ArrowLeftRight className="w-4 h-4" />
+              <span>Sinkronkan Sekarang</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* SYNC STATUS BANNER */}
       <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
@@ -908,14 +997,39 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
               placeholder="Cari uraian, nomor perkara..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full border rounded-xl pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors ${
+              className={`w-full border rounded-xl pl-9 pr-8 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 transition-colors ${
                 isLight 
                   ? 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400' 
                   : 'bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500'
               }`}
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                title="Hapus pencarian"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
+
+        {searchQuery && (
+          <div className={`px-3 py-1.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+            isLight ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-amber-950/40 border-amber-800/60 text-amber-300'
+          }`}>
+            <span className="font-semibold">
+              🔍 Menemukan <strong>{filteredRecords.length}</strong> transaksi untuk pencarian "{searchQuery}" di seluruh bulan.
+            </span>
+            <button
+              onClick={() => setSearchQuery('')}
+              className="text-xs font-bold underline hover:opacity-80 ml-2"
+            >
+              Reset Filter
+            </button>
+          </div>
+        )}
 
         {/* Month Pills Row */}
         <div className="flex items-center space-x-1 overflow-x-auto w-full pt-1 pb-1 scrollbar-thin">

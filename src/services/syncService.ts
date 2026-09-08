@@ -180,6 +180,122 @@ export class SyncService {
   }
 
   /**
+   * Helper to check if a JurnalBiayaSkumRecord represents an ATK / Biaya Pemberkasan deduction
+   */
+  static isAtkSkumItem(record: JurnalBiayaSkumRecord): boolean {
+    const no = (record.nomorPerkara || '').trim();
+    if (!no || no === '-' || no.toLowerCase().includes('kepaniteraan umum')) return false;
+    const pengeluaran = Number(record.pengeluaran) || 0;
+    if (pengeluaran <= 0) return false;
+
+    const kat = (record.kategori || '').toLowerCase();
+    const u = (record.uraian || '').toLowerCase();
+    return kat === 'atk' || 
+           u.includes('atk') || 
+           u.includes('pemberkasan') || 
+           u.includes('biaya proses') || 
+           u.includes('pengelolaan atk');
+  }
+
+  /**
+   * Reconcile / Bridge ATK & Biaya Proses entries from JurnalBiayaSKUM to BukuBiayaProses.
+   * Ensures that any ATK / Biaya Pemberkasan fee deducted in Jurnal SKUM per case
+   * (such as perkara 2/Pdt.G/2026/PA.Pan) is automatically recorded as Penerimaan (Debet)
+   * in Buku Bantu Biaya Proses without duplicating existing records.
+   */
+  static reconcileBiayaProsesWithSkum(
+    biayaProsesRecords: BiayaProsesRecord[],
+    jurnalSkumRecords: JurnalBiayaSkumRecord[]
+  ): {
+    reconciled: BiayaProsesRecord[];
+    addedCount: number;
+    addedRecords: BiayaProsesRecord[];
+  } {
+    const result = [...(biayaProsesRecords || [])];
+    const addedRecords: BiayaProsesRecord[] = [];
+    const matchedBpIds = new Set<string>();
+
+    const atkSkumItems = (jurnalSkumRecords || []).filter(s => this.isAtkSkumItem(s));
+
+    for (const skum of atkSkumItems) {
+      const normSkumNo = (skum.nomorPerkara || '').trim().toLowerCase().replace(/\s+/g, '');
+      const skumAmount = Number(skum.pengeluaran) || 0;
+
+      const existingIndex = result.findIndex(b => {
+        if (matchedBpIds.has(b.id)) return false;
+        const normBpNo = (b.nomorPerkara || '').trim().toLowerCase().replace(/\s+/g, '');
+        if (normBpNo !== normSkumNo) return false;
+
+        // 1. Direct ID matching or embedded timestamp matching
+        if (b.id === `bp-atk-${skum.id}` || b.id === skum.id || b.id.includes(skum.id)) {
+          return true;
+        }
+
+        const skumTs = (skum.id.match(/\d{12,}/) || [])[0];
+        const bpTs = (b.id.match(/\d{12,}/) || [])[0];
+        if (skumTs && bpTs && skumTs === bpTs) {
+          return true;
+        }
+
+        // 2. Same case number and same penerimaan amount
+        const bpPenerimaan = Number(b.penerimaan) || 0;
+        if (bpPenerimaan === skumAmount) {
+          const bpKat = (b.kategori || '').toLowerCase();
+          const bpU = (b.uraian || '').toLowerCase();
+          if (
+            bpKat === 'atk' || 
+            bpKat === 'proses' || 
+            bpU.includes('atk') || 
+            bpU.includes('pemberkasan') || 
+            bpU.includes('biaya proses')
+          ) {
+            return true;
+          }
+        }
+
+        return false;
+      });
+
+      if (existingIndex !== -1) {
+        matchedBpIds.add(result[existingIndex].id);
+      } else {
+        // Missing in Biaya Proses! Generate corresponding BiayaProsesRecord
+        const cleanId = skum.id.startsWith('skum-')
+          ? `bp-atk-${skum.id.substring(5)}`
+          : `bp-atk-${skum.id}`;
+
+        const newBp: BiayaProsesRecord = {
+          id: cleanId,
+          tanggal: skum.tanggal || new Date().toISOString().split('T')[0],
+          nomorPerkara: skum.nomorPerkara.trim(),
+          uraian: skum.uraian && skum.uraian.trim().length > 0 
+            ? skum.uraian.trim() 
+            : 'Pencatatan Jurnal: Biaya Pemberkasan / ATK',
+          penerimaan: skumAmount,
+          pengeluaran: 0,
+          kategori: 'ATK',
+          keterangan: skum.keterangan && !skum.keterangan.startsWith('Pencatatan Jurnal SKUM')
+            ? skum.keterangan
+            : 'Pemotongan Panjar ATK Perkara (Buku Bantu)',
+          createdAt: skum.createdAt || new Date().toISOString()
+        };
+
+        result.push(newBp);
+        matchedBpIds.add(newBp.id);
+        addedRecords.push(newBp);
+      }
+    }
+
+    result.sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
+
+    return {
+      reconciled: result,
+      addedCount: addedRecords.length,
+      addedRecords
+    };
+  }
+
+  /**
    * Parse CSV content into CaseRecord objects.
    * Flexibly matches Indonesian header titles and handles column 11 status fallback.
    */
@@ -823,10 +939,15 @@ export class SyncService {
           };
         }
 
+        const { reconciled: reconciledBp } = SyncService.reconcileBiayaProsesWithSkum(
+          rawBiaya || [],
+          mappedJurnal || []
+        );
+
         return {
           cases: mappedCases,
           jurnalSkum: mappedJurnal,
-          biayaProses: rawBiaya,
+          biayaProses: reconciledBp,
           pinjamanSkum: mappedPinjaman,
           kasOpname: mappedKasOpname
         };
@@ -875,7 +996,7 @@ export class SyncService {
 
       const cases = casesCsv ? this.parseCsv(casesCsv) : [];
       const jurnalSkum = jurnalCsv ? this.parseJurnalBiayaSkumCsv(jurnalCsv) : [];
-      const biayaProses = biayaCsv ? this.parseBiayaProsesCsv(biayaCsv) : [];
+      let biayaProses = biayaCsv ? this.parseBiayaProsesCsv(biayaCsv) : [];
       let pinjamanSkum = pinjamCsv ? this.parsePinjamanSaldoCsv(pinjamCsv) : [];
       let kasOpname = kasOpnameCsv ? this.parseKasOpnameCsv(kasOpnameCsv) : undefined;
 
@@ -891,6 +1012,12 @@ export class SyncService {
             }
           });
         }
+      }
+
+      // Reconcile Biaya Proses with Jurnal SKUM ATK deductions
+      if (jurnalSkum.length > 0) {
+        const { reconciled: reconciledBp } = this.reconcileBiayaProsesWithSkum(biayaProses, jurnalSkum);
+        biayaProses = reconciledBp;
       }
 
       if (cases.length > 0 || jurnalSkum.length > 0 || biayaProses.length > 0 || kasOpname) {
@@ -915,10 +1042,14 @@ export class SyncService {
         if (pinjam.length === 0 && appsScriptData.jurnalSkum.length > 0) {
           pinjam = this.reconstructPinjamanFromJurnal(appsScriptData.jurnalSkum);
         }
+        const { reconciled: reconciledBp } = this.reconcileBiayaProsesWithSkum(
+          appsScriptData.biayaProses || [],
+          appsScriptData.jurnalSkum || []
+        );
         return {
           cases: appsScriptData.cases,
           jurnalSkum: appsScriptData.jurnalSkum,
-          biayaProses: appsScriptData.biayaProses,
+          biayaProses: reconciledBp,
           pinjamanSkum: pinjam,
           kasOpname: appsScriptData.kasOpname,
           source: 'appsscript'
