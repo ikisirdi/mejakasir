@@ -132,26 +132,52 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <span>💼 Buku Bantu Biaya Proses</span>
             </button>
-            <button
-              id="tab-simulasi-atk-btn"
-              onClick={() => setActiveTab('simulasi-atk-ai')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center space-x-1.5 ${
-                activeTab === 'simulasi-atk-ai'
-                  ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-400 font-black'
-                  : isLight 
-                    ? 'text-purple-800 hover:bg-purple-100/80' 
-                    : 'text-purple-300 hover:text-white hover:bg-slate-700/50'
-              }`}
-              title="Menu Khusus: Buku Pembantu & Simulasi Pengeluaran ATK Perkara berbasis AI (Saldo Putus Rp0)"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>🤖 Buku Bantu ATK (AI)</span>
-              {pendingSimulasiAtkCount !== undefined && pendingSimulasiAtkCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-purple-200 text-purple-900 font-mono shadow-xs">
-                  {pendingSimulasiAtkCount}
-                </span>
+            <div className="flex items-center space-x-1">
+              <button
+                id="tab-simulasi-atk-btn"
+                onClick={() => setActiveTab('simulasi-atk-ai')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center space-x-1.5 ${
+                  activeTab === 'simulasi-atk-ai'
+                    ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-400 font-black'
+                    : isLight 
+                      ? 'text-purple-800 hover:bg-purple-100/80' 
+                      : 'text-purple-300 hover:text-white hover:bg-slate-700/50'
+                }`}
+                title="Menu Khusus: Buku Pembantu & Simulasi Pengeluaran ATK Perkara berbasis AI (Saldo Putus Rp0)"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>🤖 Buku Bantu ATK (AI)</span>
+                {pendingSimulasiAtkCount !== undefined && pendingSimulasiAtkCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-purple-200 text-purple-900 font-mono shadow-xs">
+                    {pendingSimulasiAtkCount}
+                  </span>
+                )}
+              </button>
+
+              {onOpenCetakLaporanAtk && (
+                <button
+                  id="navbar-cetak-atk-quick-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (activeTab !== 'simulasi-atk-ai') {
+                      setActiveTab('simulasi-atk-ai');
+                    }
+                    onOpenCetakLaporanAtk();
+                  }}
+                  className={`px-2 py-1.5 rounded-lg text-xs font-black border transition-all flex items-center space-x-1 ${
+                    activeTab === 'simulasi-atk-ai'
+                      ? 'bg-purple-700 hover:bg-purple-800 text-white border-purple-500 shadow-xs'
+                      : isLight
+                        ? 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100'
+                        : 'bg-purple-950/60 text-purple-300 border-purple-800 hover:bg-purple-900/60'
+                  }`}
+                  title="Cetak Laporan Resmi Buku Pembantu ATK Perbulan / Pertahun (Data Spreadsheet)"
+                >
+                  <Printer className="w-3.5 h-3.5 text-purple-200" />
+                  <span className="hidden xl:inline">Cetak Lap. Resmi</span>
+                </button>
               )}
-            </button>
+            </div>
             <button
               id="tab-kas-kuning-btn"
               onClick={() => setActiveTab('kas-kuning')}

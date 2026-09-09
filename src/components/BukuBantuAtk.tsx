@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { 
   Sparkles, Plus, Trash2, Edit3, Search, Filter, 
   Download, Printer, RefreshCw, FileText, CheckCircle2, 
-  AlertTriangle, Eye, Code, Copy, Check, X, Calendar, ArrowUpDown
+  AlertTriangle, Eye, Code, Copy, Check, X, Calendar, ArrowUpDown, CloudUpload
 } from 'lucide-react';
 import { CaseRecord, SimulasiAtkRecord, JurnalBiayaSkumRecord } from '../types';
 import { ATK_REFERENCE_ITEMS, generateAtkSimulationDeterministic } from '../data/atkRubric';
@@ -13,7 +13,7 @@ interface BukuBantuAtkProps {
   cases: CaseRecord[];
   jurnalSkum: JurnalBiayaSkumRecord[];
   simulasiAtkRecords: SimulasiAtkRecord[];
-  onSaveSimulasiAtkRecords: (records: SimulasiAtkRecord[]) => void;
+  onSaveSimulasiAtkRecords: (records: SimulasiAtkRecord[], syncPayload?: SimulasiAtkRecord[] | false) => void;
   onAddSimulasiAtkRecord?: (record: SimulasiAtkRecord) => void;
   onDeleteSimulasiAtkRecord?: (id: string) => void;
   onDeleteCaseSimulasi?: (nomorPerkara: string) => void;
@@ -92,13 +92,14 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
   // Standard incoming ATK per registered case is Rp 100.000 (from SKUM or Biaya Pendaftaran Hak ATK)
   const caseFinancials = useMemo(() => {
     return cases.map(c => {
+      const normCase = (c.nomorPerkara || '').trim().toLowerCase();
       // Find incoming ATK entries in Jurnal SKUM or Simulasi records
       const skumAtkDebet = jurnalSkum
-        .filter(j => j.nomorPerkara === c.nomorPerkara && (j.kategori === 'ATK' || j.uraian.toLowerCase().includes('atk') || j.uraian.toLowerCase().includes('pemberkasan')))
+        .filter(j => (j.nomorPerkara || '').trim().toLowerCase() === normCase && (j.kategori === 'ATK' || (j.uraian || '').toLowerCase().includes('atk') || (j.uraian || '').toLowerCase().includes('pemberkasan')))
         .reduce((acc, curr) => acc + (curr.pengeluaran > 0 ? curr.pengeluaran : (curr.penerimaan || 0)), 0);
 
       const simAtkDebet = simulasiAtkRecords
-        .filter(s => s.nomorPerkara === c.nomorPerkara && (s.penerimaan || 0) > 0)
+        .filter(s => (s.nomorPerkara || '').trim().toLowerCase() === normCase && (s.penerimaan || 0) > 0)
         .reduce((acc, curr) => acc + curr.penerimaan, 0);
 
       // Standard court rule: Each registered case brings in Rp 100.000 for ATK / Pemberkasan
@@ -107,7 +108,7 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
 
       // Simulated or actual ATK expenses recorded
       const totalKeluar = simulasiAtkRecords
-        .filter(s => s.nomorPerkara === c.nomorPerkara && (s.pengeluaran || 0) > 0)
+        .filter(s => (s.nomorPerkara || '').trim().toLowerCase() === normCase && (s.pengeluaran || 0) > 0)
         .reduce((acc, curr) => acc + curr.pengeluaran, 0);
 
       const sisaSaldo = totalMasuk - totalKeluar;
@@ -367,11 +368,13 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
   const handleSaveModalSimulation = async () => {
     if (!selectedCaseForModal || previewSimulatedItems.length === 0) return;
 
+    const targetNo = (selectedCaseForModal.nomorPerkara || '').trim().toLowerCase();
     // Filter out previous simulation records for this case
-    const cleanedRecords = simulasiAtkRecords.filter(r => r.nomorPerkara !== selectedCaseForModal.nomorPerkara);
-    const updatedRecords = [...cleanedRecords, ...previewSimulatedItems];
+    const cleanedRecords = simulasiAtkRecords.filter(r => (r.nomorPerkara || '').trim().toLowerCase() !== targetNo);
+    const updatedRecords = [...previewSimulatedItems, ...cleanedRecords];
 
-    onSaveSimulasiAtkRecords(updatedRecords);
+    // Update state & storage without double-firing webhook (we trigger pushSimulasiAtkToCloud directly below)
+    onSaveSimulasiAtkRecords(updatedRecords, false);
     setShowSimulateModal(false);
 
     // Sync to Google Sheets if webhook configured
@@ -416,11 +419,11 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
     }
 
     // Merge into records
-    const pendingNos = new Set(pending.map(p => p.nomorPerkara));
-    const retained = simulasiAtkRecords.filter(r => !pendingNos.has(r.nomorPerkara));
-    const finalAll = [...retained, ...newSimulatedList];
+    const pendingNos = new Set(pending.map(p => (p.nomorPerkara || '').trim().toLowerCase()));
+    const retained = simulasiAtkRecords.filter(r => !pendingNos.has((r.nomorPerkara || '').trim().toLowerCase()));
+    const finalAll = [...newSimulatedList, ...retained];
 
-    onSaveSimulasiAtkRecords(finalAll);
+    onSaveSimulasiAtkRecords(finalAll, false);
     setIsBatchSimulating(false);
     setBatchProgress(null);
 
@@ -443,8 +446,9 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
       if (onDeleteCaseSimulasi) {
         onDeleteCaseSimulasi(nomorPerkara);
       } else {
-        const filtered = simulasiAtkRecords.filter(r => r.nomorPerkara !== nomorPerkara);
-        onSaveSimulasiAtkRecords(filtered);
+        const normNo = (nomorPerkara || '').trim().toLowerCase();
+        const filtered = simulasiAtkRecords.filter(r => (r.nomorPerkara || '').trim().toLowerCase() !== normNo);
+        onSaveSimulasiAtkRecords(filtered, false);
       }
       if (googleSheetWebhookUrl) {
         SyncService.postToWebhook(googleSheetWebhookUrl, 'delete_simulasi_atk_case', { nomorPerkara });
@@ -1605,43 +1609,75 @@ if (sheetSimAtk) {
       )}
 
       {/* DETAIL DRAWER / MODAL FOR SINGLE CASE TRANSACTIONS */}
-      {inspectCase && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
-          <div className={`w-full max-w-2xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[85vh] ${
-            isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-700 text-slate-100'
-          }`}>
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-purple-600 text-white">
-              <div>
-                <h3 className="font-extrabold text-sm">Rincian Transaksi ATK: {inspectCase.nomorPerkara}</h3>
-                <p className="text-[11px] text-purple-100">{inspectCase.namaPihak}</p>
-              </div>
-              <button onClick={() => setInspectCase(null)} className="text-purple-200 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 overflow-y-auto space-y-3">
-              {simulasiAtkRecords.filter(r => r.nomorPerkara === inspectCase.nomorPerkara).length === 0 ? (
-                <div className="py-8 text-center text-slate-400 text-xs">
-                  Belum ada transaksi ATK yang tersimpan untuk perkara ini.
+      {inspectCase && (() => {
+        const targetNo = (inspectCase.nomorPerkara || '').trim().toLowerCase();
+        const caseSimRecords = simulasiAtkRecords.filter(r => (r.nomorPerkara || '').trim().toLowerCase() === targetNo);
+        const totalPengeluaranCase = caseSimRecords.reduce((acc, r) => acc + (r.pengeluaran || 0), 0);
+        const fin = caseFinancials.find(f => (f.caseRecord.nomorPerkara || '').trim().toLowerCase() === targetNo);
+        const totalMasukCase = fin ? fin.totalMasuk : 100000;
+        const sisaSaldoCase = totalMasukCase - totalPengeluaranCase;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+            <div className={`w-full max-w-2xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[85vh] ${
+              isLight ? 'bg-white border-slate-200 text-slate-800' : 'bg-slate-900 border-slate-700 text-slate-100'
+            }`}>
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-purple-600 text-white">
+                <div>
+                  <h3 className="font-extrabold text-sm">Rincian Transaksi ATK: {inspectCase.nomorPerkara}</h3>
+                  <p className="text-[11px] text-purple-100">{inspectCase.namaPihak} • Status: {inspectCase.status || 'Berjalan'}</p>
                 </div>
-              ) : (
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 border-b font-bold text-slate-600">
-                        <th className="p-2.5">Tanggal</th>
-                        <th className="p-2.5">Uraian ATK</th>
-                        <th className="p-2.5 text-right">Pengeluaran</th>
-                        <th className="p-2.5 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium">
-                      {simulasiAtkRecords
-                        .filter(r => r.nomorPerkara === inspectCase.nomorPerkara)
-                        .map(r => (
-                          <tr key={r.id}>
+                <button onClick={() => setInspectCase(null)} className="text-purple-200 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Status Ringkasan Finansial Perkara */}
+              <div className="p-3 bg-purple-50/70 border-b border-purple-100 grid grid-cols-3 gap-2 text-xs">
+                <div className="bg-white p-2 rounded-lg border border-purple-100 shadow-2xs">
+                  <span className="text-[10px] text-slate-500 font-bold block">Penerimaan Biaya ATK</span>
+                  <span className="font-extrabold text-slate-800 font-mono">{formatRp(totalMasukCase)}</span>
+                </div>
+                <div className="bg-white p-2 rounded-lg border border-purple-100 shadow-2xs">
+                  <span className="text-[10px] text-slate-500 font-bold block">Total Pengeluaran ATK</span>
+                  <span className="font-extrabold text-rose-600 font-mono">{formatRp(totalPengeluaranCase)}</span>
+                </div>
+                <div className="bg-white p-2 rounded-lg border border-purple-100 shadow-2xs">
+                  <span className="text-[10px] text-slate-500 font-bold block">Sisa Saldo ATK</span>
+                  <span className={`font-black font-mono ${sisaSaldoCase === 0 ? 'text-emerald-600' : 'text-purple-700'}`}>
+                    {formatRp(sisaSaldoCase)} {sisaSaldoCase === 0 ? '✓ Nol' : ''}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 overflow-y-auto space-y-3">
+                {caseSimRecords.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 text-xs">
+                    <Sparkles className="w-8 h-8 text-purple-300 mx-auto mb-2 opacity-60" />
+                    <p className="font-bold text-slate-600">Belum ada rincian transaksi ATK yang tersimpan.</p>
+                    <p className="text-[11px] mt-1">Klik tombol &quot;Simulasi Ulang AI&quot; di bawah untuk men-generate otomatis.</p>
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 border-b font-bold text-slate-600">
+                          <th className="p-2.5 w-8 text-center">No</th>
+                          <th className="p-2.5">Tanggal</th>
+                          <th className="p-2.5">Uraian / Jenis ATK</th>
+                          <th className="p-2.5 text-right">Pengeluaran</th>
+                          <th className="p-2.5 text-center">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {caseSimRecords.map((r, idx) => (
+                          <tr key={r.id} className="hover:bg-purple-50/40">
+                            <td className="p-2.5 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
                             <td className="p-2.5 font-mono text-slate-600">{r.tanggal}</td>
-                            <td className="p-2.5 font-bold text-slate-800">{r.uraian}</td>
+                            <td className="p-2.5 font-bold text-slate-800">
+                              <div>{r.uraian}</div>
+                              {r.keterangan && <div className="text-[10px] text-slate-400 font-normal">{r.keterangan}</div>}
+                            </td>
                             <td className="p-2.5 text-right font-mono font-black text-rose-600">{formatRp(r.pengeluaran)}</td>
                             <td className="p-2.5 text-center">
                               <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-100 text-purple-800 font-bold">
@@ -1650,22 +1686,54 @@ if (sheetSimAtk) {
                             </td>
                           </tr>
                         ))}
-                    </tbody>
-                  </table>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="p-3 border-t border-slate-200 flex items-center justify-between bg-slate-50">
+                <button
+                  onClick={() => {
+                    const c = inspectCase;
+                    setInspectCase(null);
+                    handleOpenSimulateModal(c);
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center space-x-1.5 shadow-xs"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Simulasi Ulang AI</span>
+                </button>
+                <div className="flex items-center space-x-2">
+                  {googleSheetWebhookUrl && caseSimRecords.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        setSyncStatusMsg({ type: 'success', text: `Menyinkronkan transaksi perkara ${inspectCase.nomorPerkara} ke Google Sheets...` });
+                        const res = await SyncService.pushSimulasiAtkToCloud(googleSheetWebhookUrl, caseSimRecords);
+                        if (res.success) {
+                          setSyncStatusMsg({ type: 'success', text: `Berhasil tersimpan ke Google Sheets!` });
+                        } else {
+                          setSyncStatusMsg({ type: 'error', text: 'Gagal menyinkronkan ke Google Sheets. Periksa URL webhook.' });
+                        }
+                        setTimeout(() => setSyncStatusMsg(null), 5000);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center space-x-1"
+                    >
+                      <CloudUpload className="w-3.5 h-3.5" />
+                      <span>Sinkronkan ke Sheet</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setInspectCase(null)}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200"
+                  >
+                    Tutup
+                  </button>
                 </div>
-              )}
-            </div>
-            <div className="p-3 border-t border-slate-200 flex justify-end bg-slate-50">
-              <button
-                onClick={() => setInspectCase(null)}
-                className="px-4 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200"
-              >
-                Tutup
-              </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL CETAK LAPORAN RESMI BUKU PEMBANTU ATK */}
       <LaporanResmiAtkModal

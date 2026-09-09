@@ -14,7 +14,7 @@ import {
 } from './types';
 import { StorageService, TARGET_APPS_SCRIPT_URL, TARGET_SPREADSHEET_URL } from './services/storage';
 import { SyncService } from './services/syncService';
-import { generateAtkSimulationDeterministic } from './data/atkRubric';
+import { generateAtkSimulationDeterministic, migrateLegacySimulasiAtkRecords, mergeSimulasiAtkRecords } from './data/atkRubric';
 import { Navbar } from './components/Navbar';
 import { CaseTable } from './components/CaseTable';
 import { BukuBiayaProses } from './components/BukuBiayaProses';
@@ -452,9 +452,10 @@ export default function App() {
       initialSyncedJurnal
     );
 
-    // Initial local simulasi ATK with auto-zero for Putus cases
+    // Initial local simulasi ATK with auto-zero for Putus cases & migrate any legacy bundled descriptions
     const loadedSimulasiAtk = StorageService.getSimulasiAtkRecords();
-    const { updatedSimList: autoZeroedSimulasiAtk } = autoZeroOutPutusCases(syncedLoadedCases, loadedSimulasiAtk);
+    const migratedLoadedSimulasiAtk = migrateLegacySimulasiAtkRecords(loadedSimulasiAtk, syncedLoadedCases);
+    const { updatedSimList: autoZeroedSimulasiAtk } = autoZeroOutPutusCases(syncedLoadedCases, migratedLoadedSimulasiAtk);
 
     setCases(syncedLoadedCases);
     setBiayaProsesRecords(initialReconciledBp);
@@ -560,7 +561,11 @@ export default function App() {
 
         let activeSimulasi = autoZeroedSimulasiAtk;
         if (liveData.simulasiAtk && liveData.simulasiAtk.length > 0) {
-          activeSimulasi = liveData.simulasiAtk;
+          const cleanedRemote = migrateLegacySimulasiAtkRecords(
+            liveData.simulasiAtk,
+            fetchedCases.length > 0 ? fetchedCases : syncedLoadedCases
+          );
+          activeSimulasi = mergeSimulasiAtkRecords(autoZeroedSimulasiAtk, cleanedRemote);
         }
         const { updatedSimList: remoteZeroedSimulasi, generatedCount: newSimCount } = autoZeroOutPutusCases(
           fetchedCases.length > 0 ? fetchedCases : syncedLoadedCases,
@@ -1704,12 +1709,15 @@ export default function App() {
   };
 
   // Simulasi ATK Handlers
-  const handleSaveSimulasiAtkRecords = (records: SimulasiAtkRecord[]) => {
+  const handleSaveSimulasiAtkRecords = (records: SimulasiAtkRecord[], syncPayload?: SimulasiAtkRecord[] | false) => {
     setSimulasiAtkRecords(records);
     StorageService.saveSimulasiAtkRecords(records);
+    if (syncPayload === false) {
+      return;
+    }
     const webhook = getWebhookUrl(syncSettings);
     if (webhook) {
-      SyncService.pushSimulasiAtkToCloud(webhook, records);
+      SyncService.pushSimulasiAtkToCloud(webhook, syncPayload || records);
     }
   };
 

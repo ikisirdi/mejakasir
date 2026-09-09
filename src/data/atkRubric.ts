@@ -28,73 +28,108 @@ export const ATK_REFERENCE_ITEMS: SimulasiAtkItemRef[] = [
   },
   {
     no: 4,
+    jenisAtk: 'Amplop Surat 1/20',
+    hargaSatuan: 20000,
+    jumlah: 1000,
+    keterangan: 'Amplop pengiriman surat panggilan / pemberitahuan relaas sidang'
+  },
+  {
+    no: 5,
     jenisAtk: 'Cetak Map Bundel A Gugatan',
     hargaSatuan: 10000,
     jumlah: 10000,
     keterangan: 'Pemberkasan Bundel A Perkara Gugatan'
   },
   {
-    no: 5,
+    no: 6,
     jenisAtk: 'Cetak Map Bundel A Permohonan',
     hargaSatuan: 10000,
     jumlah: 10000,
     keterangan: 'Pemberkasan Bundel A Perkara Permohonan'
   },
   {
-    no: 6,
-    jenisAtk: 'Cetak Map Putusan',
-    hargaSatuan: 8000,
-    jumlah: 8000,
-    keterangan: 'Map arsip dan salinan putusan perkara gugatan'
-  },
-  {
     no: 7,
-    jenisAtk: 'Cetak Map Penetapan',
-    hargaSatuan: 8000,
-    jumlah: 8000,
-    keterangan: 'Map arsip dan salinan penetapan perkara permohonan'
+    jenisAtk: 'Buku Catatan Persidangan & Register Sidang',
+    hargaSatuan: 10000,
+    jumlah: 5000,
+    keterangan: 'Buku instrumen pencatatan agenda persidangan perkara'
   },
   {
     no: 8,
-    jenisAtk: 'Cetak Map Produk',
-    hargaSatuan: 10000,
-    jumlah: 10000,
-    keterangan: 'Penyerahan produk pengadilan (Akta Cerai / Salinan Putusan)'
+    jenisAtk: 'Pembelian Pulpen Sidang & Penandatanganan Berita Acara',
+    hargaSatuan: 5000,
+    jumlah: 5000,
+    keterangan: 'Pulpen pencatatan sidang Majelis Hakim & Panitera Pengganti'
   },
   {
     no: 9,
     jenisAtk: 'Tinta Epson 1/20',
     hargaSatuan: 100000,
     jumlah: 5000,
-    keterangan: 'Porsi pemakaian cetak berkas & instrumen sidang'
+    keterangan: 'Porsi pemakaian cetak berkas & instrumen Berita Acara Sidang (BAS)'
   },
   {
     no: 10,
-    jenisAtk: 'Tinta Refiil Canon 1/10',
-    hargaSatuan: 50000,
-    jumlah: 5000,
-    keterangan: 'Porsi pemakaian cetak penggandaan berkas'
+    jenisAtk: 'Materai untuk Keperluan Leges Bukti Surat Perkara',
+    hargaSatuan: 10000,
+    jumlah: 10000,
+    keterangan: 'Bea materai untuk pemeteraian kemudian (leges) alat bukti surat para pihak'
   },
   {
     no: 11,
-    jenisAtk: 'Catridge 1/50',
-    hargaSatuan: 250000,
+    jenisAtk: 'Tinta Refiil Canon 1/10',
+    hargaSatuan: 50000,
     jumlah: 5000,
-    keterangan: 'Porsi keausan catridge printer operasional perkara'
+    keterangan: 'Porsi pemakaian cetak penggandaan dokumen pembuktian perkara'
   },
   {
     no: 12,
-    jenisAtk: 'Amplop Surat 1/20',
-    hargaSatuan: 20000,
-    jumlah: 1000,
-    keterangan: 'Amplop pengiriman surat panggilan / pemberitahuan'
+    jenisAtk: 'Catridge 1/50',
+    hargaSatuan: 250000,
+    jumlah: 5000,
+    keterangan: 'Porsi keausan catridge printer operasional persidangan'
   },
   {
     no: 13,
-    jenisAtk: 'Pembelian Alat tulis kantor lainnya yang meliputi keperluan penyelesaian perkara Antara lain Pulpen, Buku Sidang, Instrumen instrument persidangan, Stapler, isi staples Binder Clip, pulsa untuk notifikasi, pendukung penyelesaian perkara, alat keperluan arsip serta kebutuhan minum para pihak dan lain-lain',
-    hargaSatuan: 14000,
-    jumlah: 14000,
-    keterangan: 'Operasional ATK habis pakai persidangan & pelayanan para pihak'
+    jenisAtk: 'Binder Clip & Klip Kertas Penjepit Berkas',
+    hargaSatuan: 8000,
+    jumlah: 4000,
+    keterangan: 'Penjepit berkas pembuktian dan bundel surat perkara'
+  },
+  {
+    no: 14,
+    jenisAtk: 'Isi Staples & Perlengkapan Hekter Pemberkasan',
+    hargaSatuan: 8000,
+    jumlah: 4000,
+    keterangan: 'Penjilidan naskah putusan, penetapan, dan relaas panggilan'
+  },
+  {
+    no: 15,
+    jenisAtk: 'Cetak Map Putusan',
+    hargaSatuan: 8000,
+    jumlah: 8000,
+    keterangan: 'Map arsip dan salinan putusan perkara gugatan'
+  },
+  {
+    no: 16,
+    jenisAtk: 'Cetak Map Penetapan',
+    hargaSatuan: 8000,
+    jumlah: 8000,
+    keterangan: 'Map arsip dan salinan penetapan perkara permohonan'
+  },
+  {
+    no: 17,
+    jenisAtk: 'Cetak Map Produk',
+    hargaSatuan: 10000,
+    jumlah: 10000,
+    keterangan: 'Penyerahan produk pengadilan (Akta Cerai / Salinan Putusan)'
+  },
+  {
+    no: 18,
+    jenisAtk: 'Perlengkapan Lakban & Sampul Arsip Minutasi',
+    hargaSatuan: 8000,
+    jumlah: 4000,
+    keterangan: 'Penyegelan lakban & pengarsipan berkas perkara minutasi akhir'
   }
 ];
 
@@ -208,7 +243,8 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
     }
   }
 
-  // Rangkaian jenis ATK tersusun secara kronologis berurutan dari perkara masuk s/d selesai
+  // Rangkaian 16 jenis ATK tersusun secara kronologis berurutan dari perkara masuk s/d selesai
+  // Sesuai instruksi resmi: rincian detail per item (termasuk Materai untuk keperluan leges), tanpa kategori gabungan/generik
   const selectedItems: {
     jenisAtk: string;
     jumlah: number;
@@ -221,7 +257,7 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       jenisAtk: 'Stofmap Polio untuk pendaftaran Perkara',
       jumlah: 6000,
       kategori: 'Map',
-      keterangan: 'Pendaftaran awal & pengelompokan berkas perkara saat masuk',
+      keterangan: 'Pendaftaran awal & pengelompokan berkas perkara saat masuk (3 lembar)',
       tahap: 'Masuk / Pendaftaran',
       timelineRatio: 0.0 // Tepat pada tanggal perkara masuk
     },
@@ -247,7 +283,7 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Amplop',
       keterangan: 'Amplop pengiriman surat panggilan / pemberitahuan relaas sidang para pihak',
       tahap: 'Sidang Awal',
-      timelineRatio: 0.20 // Pemanggilan sidang pertama
+      timelineRatio: 0.18 // Pemanggilan sidang pertama
     },
     {
       jenisAtk: isPermohonan ? 'Cetak Map Bundel A Permohonan' : 'Cetak Map Bundel A Gugatan',
@@ -255,7 +291,23 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Map',
       keterangan: isPermohonan ? 'Pemberkasan Bundel A Perkara Permohonan oleh Panitera Pengganti' : 'Pemberkasan Bundel A Perkara Gugatan oleh Panitera Pengganti',
       tahap: 'Sidang Awal',
-      timelineRatio: 0.35 // Awal persidangan
+      timelineRatio: 0.28 // Awal persidangan
+    },
+    {
+      jenisAtk: 'Buku Catatan Persidangan & Register Sidang',
+      jumlah: 5000,
+      kategori: 'Buku',
+      keterangan: 'Buku instrumen pencatatan agenda persidangan perkara oleh Panitera Pengganti',
+      tahap: 'Sidang Awal',
+      timelineRatio: 0.35 // Tahap pembukaan sidang
+    },
+    {
+      jenisAtk: 'Pembelian Pulpen Sidang & Penandatanganan Berita Acara',
+      jumlah: 5000,
+      kategori: 'Alat Tulis',
+      keterangan: 'Pulpen khusus persidangan Majelis Hakim & penandatanganan Berita Acara Sidang (BAS)',
+      tahap: 'Pemeriksaan Sidang',
+      timelineRatio: 0.45 // Persidangan berjalan
     },
     {
       jenisAtk: 'Tinta Epson 1/20',
@@ -263,7 +315,15 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Tinta',
       keterangan: 'Pemakaian tinta printer pencetakan Berita Acara Sidang (BAS)',
       tahap: 'Pemeriksaan Sidang',
-      timelineRatio: 0.50 // Pertengahan persidangan
+      timelineRatio: 0.52 // Pertengahan persidangan
+    },
+    {
+      jenisAtk: 'Materai untuk Keperluan Leges Bukti Surat Perkara',
+      jumlah: 10000,
+      kategori: 'Materai',
+      keterangan: 'Bea materai untuk pemeteraian kemudian (leges) alat bukti surat para pihak di persidangan',
+      tahap: 'Pemeriksaan Sidang',
+      timelineRatio: 0.60 // Tahap pembuktian alat bukti surat
     },
     {
       jenisAtk: 'Tinta Refiil Canon 1/10',
@@ -271,7 +331,7 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Tinta',
       keterangan: 'Refill tinta penggandaan dokumen pembuktian & instrumen persidangan',
       tahap: 'Pemeriksaan Sidang',
-      timelineRatio: 0.65 // Tahap pembuktian
+      timelineRatio: 0.68 // Tahap pembuktian
     },
     {
       jenisAtk: 'Catridge 1/50',
@@ -279,7 +339,23 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Catridge',
       keterangan: 'Porsi keausan catridge printer operasional pemeriksaan perkara',
       tahap: 'Pemeriksaan Sidang',
-      timelineRatio: 0.80 // Menjelang putusan
+      timelineRatio: 0.75 // Menjelang putusan
+    },
+    {
+      jenisAtk: 'Binder Clip & Klip Kertas Penjepit Berkas',
+      jumlah: 4000,
+      kategori: 'Klip',
+      keterangan: 'Penjepit berkas pembuktian dan bundel surat perkara',
+      tahap: 'Pemeriksaan Sidang',
+      timelineRatio: 0.82 // Pengelompokan berkas sidang
+    },
+    {
+      jenisAtk: 'Isi Staples & Perlengkapan Hekter Pemberkasan',
+      jumlah: 4000,
+      kategori: 'Staples',
+      keterangan: 'Penjilidan naskah putusan/penetapan dan relaas panggilan',
+      tahap: 'Perkara Selesai',
+      timelineRatio: 0.88 // Persiapan minutasi
     },
     {
       jenisAtk: isPermohonan ? 'Cetak Map Penetapan' : 'Cetak Map Putusan',
@@ -287,7 +363,7 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Map',
       keterangan: isPermohonan ? 'Map naskah resmi Penetapan Hakim' : 'Map naskah resmi Putusan Majelis Hakim',
       tahap: 'Perkara Selesai',
-      timelineRatio: 0.95 // Menjelang / saat pembacaan putusan
+      timelineRatio: 0.94 // Saat pembacaan putusan/penetapan
     },
     {
       jenisAtk: 'Cetak Map Produk',
@@ -295,22 +371,23 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       kategori: 'Map',
       keterangan: 'Map penyerahan produk pengadilan kepada para pihak (Akta Cerai / Salinan Putusan)',
       tahap: 'Perkara Selesai',
-      timelineRatio: 1.0 // Tepat saat perkara selesai
+      timelineRatio: 0.98 // Penyerahan produk
     },
     {
-      jenisAtk: 'Pembelian Alat tulis kantor lainnya (Pulpen, Buku Sidang, Stapler, Binder Clip, pulsa notifikasi, arsip & konsumsi sidang)',
-      jumlah: 32000, // Menjamin total pengeluaran tepat sama dengan Rp 100.000 (6+10+8+1+10+5+5+5+8+10+32 = 100.000)
-      kategori: 'ATK Lainnya',
-      keterangan: 'Perlengkapan ATK habis pakai persidangan, penutupan berkas, dan pengarsipan perkara',
+      jenisAtk: 'Perlengkapan Lakban & Sampul Arsip Minutasi',
+      jumlah: 4000,
+      kategori: 'Arsip',
+      keterangan: 'Penyegelan lakban & pengarsipan berkas perkara minutasi akhir ke ruang arsip',
       tahap: 'Perkara Selesai',
-      timelineRatio: 1.0 // Tepat saat perkara selesai
+      timelineRatio: 1.0 // Selesai / Minutasi
     }
   ];
 
-  // Hitung total kalkulasi dan sesuaikan item terakhir bila targetAmount berbeda (misal sisa saldo parsial)
+  // Hitung total kalkulasi dan sesuaikan item bila targetAmount berbeda (misal sisa saldo parsial)
   const totalSub = selectedItems.reduce((acc, it) => acc + it.jumlah, 0);
   const diff = targetAmount - totalSub;
   if (diff !== 0 && selectedItems.length > 0) {
+    // Sesuaikan item lakban/arsip atau item terakhir agar tetap seimbang
     selectedItems[selectedItems.length - 1].jumlah = Math.max(1000, selectedItems[selectedItems.length - 1].jumlah + diff);
   }
 
@@ -325,7 +402,7 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
     return {
       id: `sim-atk-${caseRecord.id}-${index}-${timestampBase}`,
       tanggal: tgl,
-      nomorPerkara: caseRecord.nomorPerkara,
+      nomorPerkara: (caseRecord.nomorPerkara || '').trim(),
       kategoriPerkara: caseRecord.kategoriPerkara,
       statusPerkara: caseRecord.status,
       uraian: item.jenisAtk,
@@ -337,4 +414,136 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       createdAt: new Date(timestampBase + index * 1000).toISOString()
     };
   });
+}
+
+/**
+ * Migrasi otomatis data lama dari cache lokal atau spreadsheet
+ * jika masih mengandung teks generik "Pembelian Alat tulis kantor lainnya..."
+ * Menggantikannya dengan 16 item rincian spesifik (termasuk Materai leges).
+ */
+export function migrateLegacySimulasiAtkRecords(
+  records: SimulasiAtkRecord[],
+  caseList: CaseRecord[]
+): SimulasiAtkRecord[] {
+  if (!records || records.length === 0) return [];
+
+  // Cari apakah ada baris yang mengandung deskripsi gabungan/generik lama
+  const hasLegacyItems = records.some(r => {
+    const u = (r.uraian || '').toLowerCase();
+    return u.includes('pembelian alat tulis kantor lainnya') ||
+           u.includes('alat tulis kantor lainnya yang meliputi') ||
+           u.includes('pulpen, buku sidang, stapler') ||
+           u.includes('kebutuhan minum para pihak');
+  });
+
+  if (!hasLegacyItems) return records;
+
+  // Kelompokkan nomor perkara yang perlu diperbarui
+  const casesWithLegacy = new Set<string>();
+  records.forEach(r => {
+    const u = (r.uraian || '').toLowerCase();
+    if (
+      u.includes('pembelian alat tulis kantor lainnya') ||
+      u.includes('alat tulis kantor lainnya yang meliputi') ||
+      u.includes('pulpen, buku sidang, stapler') ||
+      u.includes('kebutuhan minum para pihak')
+    ) {
+      if (r.nomorPerkara) {
+        casesWithLegacy.add(r.nomorPerkara.trim().toLowerCase());
+      }
+    }
+  });
+
+  let migrated = records.filter(r => {
+    const no = (r.nomorPerkara || '').trim().toLowerCase();
+    return !casesWithLegacy.has(no);
+  });
+
+  casesWithLegacy.forEach(normNo => {
+    const targetCase = caseList.find(c => (c.nomorPerkara || '').trim().toLowerCase() === normNo);
+    if (targetCase) {
+      const regenerated = generateAtkSimulationDeterministic({
+        caseRecord: targetCase,
+        targetAmount: 100000,
+        tanggalMasuk: targetCase.tanggalRegister,
+        tanggalSelesai: targetCase.tanggalPutus || targetCase.tanggalRegister || new Date().toISOString().split('T')[0]
+      });
+      migrated = [...regenerated, ...migrated];
+    }
+  });
+
+  return migrated;
+}
+
+/**
+ * Menggabungkan records Simulasi ATK lokal dan remote (dari Google Sheets)
+ * Menjaga agar data AI yang baru saja di-generate atau disimpan di lokal tidak tertimpa kembali
+ * ke setelan awal saat halaman di-reload.
+ */
+export function mergeSimulasiAtkRecords(
+  localRecords: SimulasiAtkRecord[],
+  remoteRecords: SimulasiAtkRecord[]
+): SimulasiAtkRecord[] {
+  if (!remoteRecords || remoteRecords.length === 0) return localRecords || [];
+  if (!localRecords || localRecords.length === 0) return remoteRecords || [];
+
+  // Group by nomor perkara
+  const localByCase = new Map<string, SimulasiAtkRecord[]>();
+  localRecords.forEach(r => {
+    const k = (r.nomorPerkara || '').trim().toLowerCase();
+    if (!localByCase.has(k)) localByCase.set(k, []);
+    localByCase.get(k)!.push(r);
+  });
+
+  const remoteByCase = new Map<string, SimulasiAtkRecord[]>();
+  remoteRecords.forEach(r => {
+    const k = (r.nomorPerkara || '').trim().toLowerCase();
+    if (!remoteByCase.has(k)) remoteByCase.set(k, []);
+    remoteByCase.get(k)!.push(r);
+  });
+
+  const allCaseKeys = new Set([...localByCase.keys(), ...remoteByCase.keys()]);
+  const result: SimulasiAtkRecord[] = [];
+
+  allCaseKeys.forEach(caseKey => {
+    const locals = localByCase.get(caseKey) || [];
+    const remotes = remoteByCase.get(caseKey) || [];
+
+    if (locals.length > 0 && remotes.length === 0) {
+      result.push(...locals);
+      return;
+    }
+    if (remotes.length > 0 && locals.length === 0) {
+      result.push(...remotes);
+      return;
+    }
+
+    // Both exist: check which one is newer or more granular
+    const localHasLegacy = locals.some(r => {
+      const u = (r.uraian || '').toLowerCase();
+      return u.includes('pembelian alat tulis kantor lainnya') || u.includes('pulpen, buku sidang, stapler');
+    });
+    const remoteHasLegacy = remotes.some(r => {
+      const u = (r.uraian || '').toLowerCase();
+      return u.includes('pembelian alat tulis kantor lainnya') || u.includes('pulpen, buku sidang, stapler');
+    });
+
+    if (remoteHasLegacy && !localHasLegacy) {
+      // Local has clean granular 16 items, remote has legacy bundle: keep local!
+      result.push(...locals);
+      return;
+    }
+
+    // Check latest createdAt timestamp
+    const maxLocalCreated = Math.max(...locals.map(r => new Date(r.createdAt || 0).getTime() || 0));
+    const maxRemoteCreated = Math.max(...remotes.map(r => new Date(r.createdAt || 0).getTime() || 0));
+
+    if (maxLocalCreated > maxRemoteCreated) {
+      result.push(...locals);
+    } else {
+      result.push(...remotes);
+    }
+  });
+
+  return result;
 }
