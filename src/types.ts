@@ -130,5 +130,28 @@ export interface KasOpnameData {
   updatedAt: string;            // ISO timestamp
 }
 
-export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table' | 'kas-kuning';
+export interface SimulasiAtkItemRef {
+  no: number;
+  jenisAtk: string;
+  hargaSatuan: number;
+  jumlah: number;
+  keterangan?: string;
+}
+
+export interface SimulasiAtkRecord {
+  id: string;
+  tanggal: string;              // YYYY-MM-DD
+  nomorPerkara: string;         // e.g. "2/Pdt.G/2026/PA.Pan"
+  kategoriPerkara?: 'Gugatan' | 'Permohonan';
+  statusPerkara?: string;       // e.g. "Putus", "Selesai", "Pendaftaran"
+  uraian: string;               // e.g. "Pembelian Kertas A4 1/5 Rim"
+  penerimaan: number;           // Rp Penerimaan Masuk ATK Perkara
+  pengeluaran: number;          // Rp Pengeluaran Simulasi ATK
+  kategori: string;             // "Penerimaan ATK" | "Kertas" | "Map" | "Tinta" | "Catridge" | "Amplop" | "ATK Lainnya"
+  keterangan?: string;
+  isAiGenerated?: boolean;      // Penanda dibuat melalui simulasi AI
+  createdAt: string;            // ISO timestamp
+}
+
+export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table' | 'kas-kuning' | 'simulasi-atk-ai';
 

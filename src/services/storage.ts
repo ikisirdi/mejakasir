@@ -1,4 +1,4 @@
-import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData } from '../types';
+import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData, SimulasiAtkRecord } from '../types';
 import { INITIAL_CASE_RECORDS } from '../data/initialData';
 
 const STORAGE_KEYS = {
@@ -10,11 +10,13 @@ const STORAGE_KEYS = {
   JURNAL_SKUM: 'pa_perkara_jurnal_skum_v1',
   PINJAMAN_SKUM: 'pa_perkara_pinjaman_skum_v1',
   KAS_OPNAME: 'pa_perkara_kas_opname_v1',
+  SIMULASI_ATK: 'pa_perkara_simulasi_atk_v1',
 };
 
 export const INITIAL_BIAYA_PROSES_RECORDS: BiayaProsesRecord[] = [];
 export const INITIAL_JURNAL_SKUM_RECORDS: JurnalBiayaSkumRecord[] = [];
 export const INITIAL_PINJAMAN_SKUM_RECORDS: PinjamanSkumRecord[] = [];
+export const INITIAL_SIMULASI_ATK_RECORDS: SimulasiAtkRecord[] = [];
 
 export const TARGET_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx_N2FEFTTruxZzyR5BzVRted8jpgE-qTSABwivhx0_s7v8aDR1VIpIsxhlABbY6jQs/exec';
 export const TARGET_SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/11YqzoHesVzx3jn_Fw_x76cs7xqpwzqazd6YP4RO5nBw/edit?usp=drive_link';
@@ -272,6 +274,27 @@ export class StorageService {
       }
     } catch (e) {
       console.error('Error saving kas opname data:', e);
+    }
+  }
+
+  static getSimulasiAtkRecords(): SimulasiAtkRecord[] {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.SIMULASI_ATK);
+      if (raw) {
+        return JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error('Error loading simulasi atk records:', e);
+    }
+    this.saveSimulasiAtkRecords(INITIAL_SIMULASI_ATK_RECORDS);
+    return INITIAL_SIMULASI_ATK_RECORDS;
+  }
+
+  static saveSimulasiAtkRecords(records: SimulasiAtkRecord[]): void {
+    try {
+      localStorage.setItem(STORAGE_KEYS.SIMULASI_ATK, JSON.stringify(records));
+    } catch (e) {
+      console.error('Error saving simulasi atk records:', e);
     }
   }
 

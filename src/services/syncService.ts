@@ -1,4 +1,4 @@
-import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData, JenisPerkara, KategoriPerkara, StatusPerkara } from '../types';
+import { CaseRecord, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData, SimulasiAtkRecord, JenisPerkara, KategoriPerkara, StatusPerkara } from '../types';
 
 export const DEFAULT_SPREADSHEET_ID = '11YqzoHesVzx3jn_Fw_x76cs7xqpwzqazd6YP4RO5nBw';
 
@@ -723,6 +723,7 @@ export class SyncService {
     biayaProses: BiayaProsesRecord[];
     pinjamanSkum?: PinjamanSkumRecord[];
     kasOpname?: KasOpnameData;
+    simulasiAtk?: SimulasiAtkRecord[];
   } | null> {
     const targetUrl = url.trim();
     if (!targetUrl || !targetUrl.includes('script.google.com')) return null;
@@ -739,6 +740,7 @@ export class SyncService {
       let rawBiaya: any[] = [];
       let rawPinjaman: any[] = [];
       let rawKasOpname: any = null;
+      let rawSimulasiAtk: any[] = [];
 
       if (Array.isArray(json)) {
         rawCases = json;
@@ -757,6 +759,9 @@ export class SyncService {
         if (Array.isArray(json.pinjamanSaldo)) rawPinjaman = json.pinjamanSaldo;
         else if (Array.isArray(json.pinjamanSkum)) rawPinjaman = json.pinjamanSkum;
         else if (Array.isArray(json.pinjaman)) rawPinjaman = json.pinjaman;
+
+        if (Array.isArray(json.simulasiAtk)) rawSimulasiAtk = json.simulasiAtk;
+        else if (Array.isArray(json.simulasi)) rawSimulasiAtk = json.simulasi;
 
         if (json.kasOpname && typeof json.kasOpname === 'object') {
           rawKasOpname = json.kasOpname;
@@ -939,6 +944,22 @@ export class SyncService {
           };
         }
 
+        let mappedSimulasiAtk: SimulasiAtkRecord[] = [];
+        if (rawSimulasiAtk.length > 0) {
+          mappedSimulasiAtk = rawSimulasiAtk.map((s, idx) => ({
+            id: String(s.id || `sim-atk-${idx + 1}`),
+            tanggal: String(s.tanggal || new Date().toISOString().split('T')[0]),
+            nomorPerkara: String(s.nomorPerkara || '-'),
+            uraian: String(s.uraian || ''),
+            penerimaan: Number(s.penerimaan || s.debet) || 0,
+            pengeluaran: Number(s.pengeluaran || s.kredit) || 0,
+            kategori: String(s.kategori || 'ATK Lainnya'),
+            keterangan: String(s.keterangan || ''),
+            isAiGenerated: Boolean(s.isAiGenerated !== false),
+            createdAt: String(s.createdAt || new Date().toISOString())
+          }));
+        }
+
         const { reconciled: reconciledBp } = SyncService.reconcileBiayaProsesWithSkum(
           rawBiaya || [],
           mappedJurnal || []
@@ -949,7 +970,8 @@ export class SyncService {
           jurnalSkum: mappedJurnal,
           biayaProses: reconciledBp,
           pinjamanSkum: mappedPinjaman,
-          kasOpname: mappedKasOpname
+          kasOpname: mappedKasOpname,
+          simulasiAtk: mappedSimulasiAtk
         };
       }
     } catch (err) {
@@ -970,6 +992,7 @@ export class SyncService {
     jurnalSkum: JurnalBiayaSkumRecord[];
     biayaProses: BiayaProsesRecord[];
     pinjamanSkum: PinjamanSkumRecord[];
+    simulasiAtk?: SimulasiAtkRecord[];
     kasOpname?: KasOpnameData;
     source: 'appsscript' | 'direct_sheet';
   } | null> {
@@ -980,12 +1003,13 @@ export class SyncService {
     try {
       const gvizBase = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&_t=${timestamp}`;
 
-      const [resCases, resJurnal, resBiaya, resPinjam, resKasOpname] = await Promise.allSettled([
+      const [resCases, resJurnal, resBiaya, resPinjam, resKasOpname, resSimulasi] = await Promise.allSettled([
         fetch(`${gvizBase}&sheet=DataPerkara`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
         fetch(`${gvizBase}&sheet=JurnalBiayaSKUM`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
         fetch(`${gvizBase}&sheet=BukuBiayaProses`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
         fetch(`${gvizBase}&sheet=PinjamanSaldo`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
-        fetch(`${gvizBase}&sheet=KasOpnameKasir`, { cache: 'no-store' }).then(r => r.ok ? r.text() : '')
+        fetch(`${gvizBase}&sheet=KasOpnameKasir`, { cache: 'no-store' }).then(r => r.ok ? r.text() : ''),
+        fetch(`${gvizBase}&sheet=SimulasiAtkPerkara`, { cache: 'no-store' }).then(r => r.ok ? r.text() : '')
       ]);
 
       const casesCsv = resCases.status === 'fulfilled' ? resCases.value : '';
@@ -993,12 +1017,14 @@ export class SyncService {
       const biayaCsv = resBiaya.status === 'fulfilled' ? resBiaya.value : '';
       const pinjamCsv = resPinjam.status === 'fulfilled' ? resPinjam.value : '';
       const kasOpnameCsv = resKasOpname.status === 'fulfilled' ? resKasOpname.value : '';
+      const simulasiCsv = resSimulasi.status === 'fulfilled' ? resSimulasi.value : '';
 
       const cases = casesCsv ? this.parseCsv(casesCsv) : [];
       const jurnalSkum = jurnalCsv ? this.parseJurnalBiayaSkumCsv(jurnalCsv) : [];
       let biayaProses = biayaCsv ? this.parseBiayaProsesCsv(biayaCsv) : [];
       let pinjamanSkum = pinjamCsv ? this.parsePinjamanSaldoCsv(pinjamCsv) : [];
       let kasOpname = kasOpnameCsv ? this.parseKasOpnameCsv(kasOpnameCsv) : undefined;
+      const simulasiAtk = simulasiCsv ? this.parseSimulasiAtkCsv(simulasiCsv) : [];
 
       // Merge loans from Jurnal SKUM as well
       if (jurnalSkum.length > 0) {
@@ -1020,12 +1046,13 @@ export class SyncService {
         biayaProses = reconciledBp;
       }
 
-      if (cases.length > 0 || jurnalSkum.length > 0 || biayaProses.length > 0 || kasOpname) {
+      if (cases.length > 0 || jurnalSkum.length > 0 || biayaProses.length > 0 || kasOpname || simulasiAtk.length > 0) {
         return {
           cases,
           jurnalSkum,
           biayaProses,
           pinjamanSkum,
+          simulasiAtk,
           kasOpname,
           source: 'direct_sheet'
         };
@@ -1051,6 +1078,7 @@ export class SyncService {
           jurnalSkum: appsScriptData.jurnalSkum,
           biayaProses: reconciledBp,
           pinjamanSkum: pinjam,
+          simulasiAtk: (appsScriptData as any).simulasiAtk || [],
           kasOpname: appsScriptData.kasOpname,
           source: 'appsscript'
         };
@@ -1294,6 +1322,101 @@ export class SyncService {
       };
       const success = await this.postToWebhook(webhookUrl, 'update_pinjaman_skum', payload);
       if (success) synced++;
+    }
+
+    return { success: synced > 0, total: records.length, synced };
+  }
+
+  /**
+   * Helper to parse a single CSV line with support for quoted values
+   */
+  static parseCsvLine(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim().replace(/^"|"$/g, ''));
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim().replace(/^"|"$/g, ''));
+    return result;
+  }
+
+  /**
+   * Parse CSV from SimulasiAtkPerkara sheet
+   */
+  static parseSimulasiAtkCsv(csvText: string): SimulasiAtkRecord[] {
+    const lines = csvText.split(/\r?\n/).filter(line => line.trim().length > 0);
+    if (lines.length < 2) return [];
+
+    const headers = this.parseCsvLine(lines[0]).map(h => (h || '').trim().toLowerCase());
+    let idCol = 0, tglCol = 1, noCol = 2, uraianCol = 3, debetCol = 4, kreditCol = 5, katCol = 6, ketCol = 7, aiCol = 8, createdCol = 9;
+
+    for (let h = 0; h < headers.length; h++) {
+      const hd = headers[h];
+      if (hd === 'id') idCol = h;
+      else if (hd === 'tanggal') tglCol = h;
+      else if (hd.includes('nomor') || hd.includes('perkara')) noCol = h;
+      else if (hd.includes('uraian') || hd.includes('jenis')) uraianCol = h;
+      else if (hd.includes('penerimaan') || hd.includes('debet')) debetCol = h;
+      else if (hd.includes('pengeluaran') || hd.includes('kredit')) kreditCol = h;
+      else if (hd.includes('kategori')) katCol = h;
+      else if (hd.includes('keterangan')) ketCol = h;
+      else if (hd.includes('ai')) aiCol = h;
+      else if (hd.includes('created')) createdCol = h;
+    }
+
+    const records: SimulasiAtkRecord[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const row = this.parseCsvLine(lines[i]);
+      if (!row || row.length === 0 || !row[0] || !row[0].trim()) continue;
+
+      records.push({
+        id: row[idCol] || `sim-atk-${Date.now()}-${i}`,
+        tanggal: row[tglCol] || new Date().toISOString().split('T')[0],
+        nomorPerkara: row[noCol] || '-',
+        uraian: row[uraianCol] || '',
+        penerimaan: Number(row[debetCol]) || 0,
+        pengeluaran: Number(row[kreditCol]) || 0,
+        kategori: row[katCol] || 'ATK Lainnya',
+        keterangan: row[ketCol] || '',
+        isAiGenerated: String(row[aiCol] || '').toLowerCase() === 'true' || String(row[aiCol] || '').toLowerCase() === 'ya',
+        createdAt: row[createdCol] || new Date().toISOString()
+      });
+    }
+
+    return records;
+  }
+
+  /**
+   * Push Simulasi ATK records to Google Sheets via Webhook
+   */
+  static async pushSimulasiAtkToCloud(webhookUrl: string, records: SimulasiAtkRecord[]): Promise<{ success: boolean; total: number; synced: number }> {
+    if (!webhookUrl || !webhookUrl.startsWith('http') || !records || records.length === 0) {
+      return { success: false, total: 0, synced: 0 };
+    }
+
+    // Try batch add first
+    const batchSuccess = await this.postToWebhook(webhookUrl, 'batch_add_simulasi_atk', {
+      items: records
+    });
+
+    if (batchSuccess) {
+      return { success: true, total: records.length, synced: records.length };
+    }
+
+    // Fallback: post one by one
+    let synced = 0;
+    for (const item of records) {
+      const ok = await this.postToWebhook(webhookUrl, 'add_simulasi_atk', item);
+      if (ok) synced++;
     }
 
     return { success: synced > 0, total: records.length, synced };

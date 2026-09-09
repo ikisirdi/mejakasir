@@ -9,9 +9,11 @@ import {
   RefreshCw, 
   Database,
   Sun,
-  Moon
+  Moon,
+  Sparkles,
+  Printer
 } from 'lucide-react';
-import { SyncSettings, CacheMetadata } from '../types';
+import { SyncSettings, CacheMetadata, ActiveTabType } from '../types';
 
 interface NavbarProps {
   onOpenForm: () => void;
@@ -24,11 +26,13 @@ interface NavbarProps {
   unreadNotifCount: number;
   syncSettings: SyncSettings;
   cacheMeta: CacheMetadata;
-  activeTab: 'table' | 'buku-biaya-proses' | 'jurnal-skum' | 'kas-kuning';
-  setActiveTab: (tab: 'table' | 'buku-biaya-proses' | 'jurnal-skum' | 'kas-kuning') => void;
+  activeTab: ActiveTabType;
+  setActiveTab: (tab: ActiveTabType) => void;
   countKasKuning?: number;
+  pendingSimulasiAtkCount?: number;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  onOpenCetakLaporanAtk?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -45,8 +49,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   countKasKuning = 0,
+  pendingSimulasiAtkCount = 0,
   theme,
-  onToggleTheme
+  onToggleTheme,
+  onOpenCetakLaporanAtk
 }) => {
   const isLight = theme === 'light';
 
@@ -125,6 +131,26 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <span>💼 Buku Bantu Biaya Proses</span>
+            </button>
+            <button
+              id="tab-simulasi-atk-btn"
+              onClick={() => setActiveTab('simulasi-atk-ai')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center space-x-1.5 ${
+                activeTab === 'simulasi-atk-ai'
+                  ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-400 font-black'
+                  : isLight 
+                    ? 'text-purple-800 hover:bg-purple-100/80' 
+                    : 'text-purple-300 hover:text-white hover:bg-slate-700/50'
+              }`}
+              title="Menu Khusus: Buku Pembantu & Simulasi Pengeluaran ATK Perkara berbasis AI (Saldo Putus Rp0)"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>🤖 Buku Bantu ATK (AI)</span>
+              {pendingSimulasiAtkCount !== undefined && pendingSimulasiAtkCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-purple-200 text-purple-900 font-mono shadow-xs">
+                  {pendingSimulasiAtkCount}
+                </span>
+              )}
             </button>
             <button
               id="tab-kas-kuning-btn"
@@ -234,6 +260,26 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </button>
 
+            {/* Cetak Laporan Resmi ATK Button */}
+            {onOpenCetakLaporanAtk && (
+              <button
+                id="navbar-cetak-atk-btn"
+                onClick={onOpenCetakLaporanAtk}
+                title="Cetak Laporan Resmi Buku Pembantu ATK Perbulan / Pertahun (Data Tersimpan di Google Spreadsheet)"
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-black border transition-all transform active:scale-95 ${
+                  activeTab === 'simulasi-atk-ai'
+                    ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30 ring-2 ring-purple-300'
+                    : isLight
+                      ? 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100 hover:shadow-xs'
+                      : 'bg-purple-950/60 text-purple-300 border-purple-800 hover:bg-purple-900/60'
+                }`}
+              >
+                <Printer className="w-3.5 h-3.5 text-purple-200" />
+                <span className="hidden sm:inline">Cetak Lap. Resmi ATK</span>
+                <span className="sm:hidden">Cetak ATK</span>
+              </button>
+            )}
+
             {/* Input Data Button */}
             <button
               id="add-new-case-btn"
@@ -281,7 +327,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               : isLight ? 'text-amber-800 bg-amber-50 border border-amber-200' : 'text-amber-400 bg-slate-800'
           }`}
         >
-          💼 Buku Bantu
+          💼 Biaya Proses
+        </button>
+        <button
+          onClick={() => setActiveTab('simulasi-atk-ai')}
+          className={`flex-1 py-1.5 text-center text-[10px] font-bold rounded-lg ${
+            activeTab === 'simulasi-atk-ai' 
+              ? 'bg-purple-600 text-white font-extrabold shadow-xs' 
+              : isLight ? 'text-purple-800 bg-purple-50 border border-purple-200' : 'text-purple-400 bg-slate-800'
+          }`}
+        >
+          🤖 ATK AI {pendingSimulasiAtkCount > 0 ? `(${pendingSimulasiAtkCount})` : ''}
         </button>
         <button
           onClick={() => setActiveTab('kas-kuning')}

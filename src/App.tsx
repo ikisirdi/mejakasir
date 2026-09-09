@@ -8,13 +8,17 @@ import {
   BiayaProsesRecord,
   JurnalBiayaSkumRecord,
   PinjamanSkumRecord,
-  StatusPerkara
+  StatusPerkara,
+  SimulasiAtkRecord,
+  ActiveTabType
 } from './types';
 import { StorageService, TARGET_APPS_SCRIPT_URL, TARGET_SPREADSHEET_URL } from './services/storage';
 import { SyncService } from './services/syncService';
+import { generateAtkSimulationDeterministic } from './data/atkRubric';
 import { Navbar } from './components/Navbar';
 import { CaseTable } from './components/CaseTable';
 import { BukuBiayaProses } from './components/BukuBiayaProses';
+import { BukuBantuAtk } from './components/BukuBantuAtk';
 import { JurnalBiayaSkumView, getEffectiveWarnaBaris } from './components/JurnalBiayaSkumView';
 import { TitipanKasKuningView } from './components/TitipanKasKuningView';
 import { CaseFormModal } from './components/CaseFormModal';
@@ -27,7 +31,7 @@ import { JurnalBiayaModal } from './components/JurnalBiayaModal';
 import { ToastNotification } from './components/ToastNotification';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'table' | 'buku-biaya-proses' | 'jurnal-skum' | 'kas-kuning'>('table');
+  const [activeTab, setActiveTab] = useState<ActiveTabType>('table');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('pa_perkara_theme_v1') as 'light' | 'dark') || 'light';
   });
@@ -35,6 +39,8 @@ export default function App() {
   const [biayaProsesRecords, setBiayaProsesRecords] = useState<BiayaProsesRecord[]>([]);
   const [jurnalSkumRecords, setJurnalSkumRecords] = useState<JurnalBiayaSkumRecord[]>([]);
   const [pinjamanSkumRecords, setPinjamanSkumRecords] = useState<PinjamanSkumRecord[]>([]);
+  const [simulasiAtkRecords, setSimulasiAtkRecords] = useState<SimulasiAtkRecord[]>(() => StorageService.getSimulasiAtkRecords());
+  const [isLaporanAtkModalOpen, setIsLaporanAtkModalOpen] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [syncSettings, setSyncSettings] = useState<SyncSettings>(StorageService.getSyncSettings());
   const [cacheMeta, setCacheMeta] = useState<CacheMetadata>(StorageService.getCacheMeta());
@@ -388,6 +394,40 @@ export default function App() {
     };
   };
 
+  // Helper to auto-generate ATK simulation for cases with status 'Putus' / 'Selesai' to zero out ATK balance
+  const autoZeroOutPutusCases = (
+    caseList: CaseRecord[],
+    currentSimList: SimulasiAtkRecord[]
+  ): { updatedSimList: SimulasiAtkRecord[]; generatedCount: number } => {
+    let result = [...currentSimList];
+    let count = 0;
+
+    caseList.forEach(c => {
+      const isPutus = c.status === 'Putus' || c.status === 'Selesai' || Boolean(c.tanggalPutus && c.tanggalPutus.trim());
+      if (!isPutus) return;
+
+      const normCase = (c.nomorPerkara || '').trim().toLowerCase();
+      const existingExpenses = result
+        .filter(s => (s.nomorPerkara || '').trim().toLowerCase() === normCase && (s.pengeluaran || 0) > 0)
+        .reduce((sum, r) => sum + r.pengeluaran, 0);
+
+      const remainingToZero = 100000 - existingExpenses;
+      if (remainingToZero > 0) {
+        const generatedItems = generateAtkSimulationDeterministic({
+          caseRecord: c,
+          targetAmount: remainingToZero,
+          tanggalMasuk: c.tanggalRegister,
+          tanggalSelesai: c.tanggalPutus || c.tanggalRegister || new Date().toISOString().split('T')[0]
+        });
+
+        result = [...generatedItems, ...result];
+        count++;
+      }
+    });
+
+    return { updatedSimList: result, generatedCount: count };
+  };
+
   // Load Initial Data from Storage / Cache & merge with fresh public data / Google Sheet
   const loadDataFromSource = useCallback(async (isForceSpreadsheetOverwrite = false) => {
     setIsRefreshing(true);
@@ -412,11 +452,17 @@ export default function App() {
       initialSyncedJurnal
     );
 
+    // Initial local simulasi ATK with auto-zero for Putus cases
+    const loadedSimulasiAtk = StorageService.getSimulasiAtkRecords();
+    const { updatedSimList: autoZeroedSimulasiAtk } = autoZeroOutPutusCases(syncedLoadedCases, loadedSimulasiAtk);
+
     setCases(syncedLoadedCases);
     setBiayaProsesRecords(initialReconciledBp);
     StorageService.saveBiayaProsesRecords(initialReconciledBp);
     setJurnalSkumRecords(sortSkumRecords(initialSyncedJurnal));
     setPinjamanSkumRecords(initialSyncedPinjaman);
+    setSimulasiAtkRecords(autoZeroedSimulasiAtk);
+    StorageService.saveSimulasiAtkRecords(autoZeroedSimulasiAtk);
     setNotifications(loadedNotifs);
     setCacheMeta(StorageService.getCacheMeta());
 
@@ -510,6 +556,21 @@ export default function App() {
 
         if (liveData.kasOpname) {
           StorageService.saveKasOpname(liveData.kasOpname);
+        }
+
+        let activeSimulasi = autoZeroedSimulasiAtk;
+        if (liveData.simulasiAtk && liveData.simulasiAtk.length > 0) {
+          activeSimulasi = liveData.simulasiAtk;
+        }
+        const { updatedSimList: remoteZeroedSimulasi, generatedCount: newSimCount } = autoZeroOutPutusCases(
+          fetchedCases.length > 0 ? fetchedCases : syncedLoadedCases,
+          activeSimulasi
+        );
+        setSimulasiAtkRecords(remoteZeroedSimulasi);
+        StorageService.saveSimulasiAtkRecords(remoteZeroedSimulasi);
+        const currentWebhookUrl = getWebhookUrl(currentSyncSettings);
+        if (currentWebhookUrl && newSimCount > 0) {
+          SyncService.pushSimulasiAtkToCloud(currentWebhookUrl, remoteZeroedSimulasi);
         }
 
         setCacheMeta(StorageService.getCacheMeta());
@@ -1497,6 +1558,27 @@ export default function App() {
       if (webhook && updatedCaseRecord) {
         SyncService.postToWebhook(webhook, 'update_case', updatedCaseRecord);
       }
+
+      // Auto-trigger ATK simulation for Putus/Selesai case to zero out ATK balance
+      if (updatedCaseRecord) {
+        const isPutus = updatedCaseRecord.status === 'Putus' || updatedCaseRecord.status === 'Selesai' || Boolean(updatedCaseRecord.tanggalPutus && updatedCaseRecord.tanggalPutus.trim());
+        if (isPutus) {
+          const { updatedSimList, generatedCount } = autoZeroOutPutusCases([updatedCaseRecord], simulasiAtkRecords);
+          if (generatedCount > 0) {
+            setSimulasiAtkRecords(updatedSimList);
+            StorageService.saveSimulasiAtkRecords(updatedSimList);
+            if (webhook) {
+              SyncService.pushSimulasiAtkToCloud(webhook, updatedSimList);
+            }
+            addNotification(
+              'Simulasi ATK Otomatis (Saldo Rp0)',
+              `Perkara ${updatedCaseRecord.nomorPerkara} berstatus ${updatedCaseRecord.status}. Saldo ATK berhasil dinolkan otomatis menggunakan perkiraan simulasi AI (13 item standar).`,
+              'success',
+              updatedCaseRecord.nomorPerkara
+            );
+          }
+        }
+      }
     } else {
       // Create new
       const newRecord: CaseRecord = {
@@ -1525,6 +1607,19 @@ export default function App() {
 
       if (webhook) {
         SyncService.postToWebhook(webhook, 'add_case', newRecord);
+      }
+
+      // If new record is already Putus, auto-generate ATK simulation
+      const isPutusNew = newRecord.status === 'Putus' || newRecord.status === 'Selesai' || Boolean(newRecord.tanggalPutus && newRecord.tanggalPutus.trim());
+      if (isPutusNew) {
+        const { updatedSimList, generatedCount } = autoZeroOutPutusCases([newRecord], simulasiAtkRecords);
+        if (generatedCount > 0) {
+          setSimulasiAtkRecords(updatedSimList);
+          StorageService.saveSimulasiAtkRecords(updatedSimList);
+          if (webhook) {
+            SyncService.pushSimulasiAtkToCloud(webhook, updatedSimList);
+          }
+        }
       }
 
       addNotification(
@@ -1577,6 +1672,13 @@ export default function App() {
         : jurnalSkumRecords;
       updateJurnalSkumState(updatedSkum);
 
+      // 4. Cascade delete all Simulasi ATK records for this nomorPerkara
+      const updatedSimAtk = targetNomor
+        ? simulasiAtkRecords.filter(s => (s.nomorPerkara || '').trim().toLowerCase() !== targetNomor)
+        : simulasiAtkRecords;
+      setSimulasiAtkRecords(updatedSimAtk);
+      StorageService.saveSimulasiAtkRecords(updatedSimAtk);
+
       // Webhook sync
       const webhook = getWebhookUrl(syncSettings);
       if (webhook) {
@@ -1587,16 +1689,58 @@ export default function App() {
         targetSkumRecords.forEach(rec => {
           SyncService.postToWebhook(webhook, 'delete_jurnal_skum', rec);
         });
+        SyncService.pushSimulasiAtkToCloud(webhook, updatedSimAtk);
       }
 
       addNotification(
         'Perkara & Data Terkait Berhasil Dihapus',
-        `Data perkara ${target.nomorPerkara} (${target.namaPihak}) beserta seluruh log di Buku Bantu Biaya Proses dan Jurnal SKUM telah berhasil dihapus.`,
+        `Data perkara ${target.nomorPerkara} (${target.namaPihak}) beserta seluruh log di Buku Bantu Biaya Proses, Jurnal SKUM, dan Simulasi ATK telah berhasil dihapus.`,
         'warning',
         target.nomorPerkara
       );
     } catch (err: any) {
       addNotification('Gagal Menghapus Perkara', err?.message || 'Terjadi kesalahan saat menghapus data perkara.', 'alert');
+    }
+  };
+
+  // Simulasi ATK Handlers
+  const handleSaveSimulasiAtkRecords = (records: SimulasiAtkRecord[]) => {
+    setSimulasiAtkRecords(records);
+    StorageService.saveSimulasiAtkRecords(records);
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.pushSimulasiAtkToCloud(webhook, records);
+    }
+  };
+
+  const handleAddSimulasiAtkRecord = (record: SimulasiAtkRecord) => {
+    const updated = [record, ...simulasiAtkRecords];
+    setSimulasiAtkRecords(updated);
+    StorageService.saveSimulasiAtkRecords(updated);
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.postToWebhook(webhook, 'add_simulasi_atk', record);
+    }
+  };
+
+  const handleDeleteSimulasiAtkRecord = (recordId: string) => {
+    const updated = simulasiAtkRecords.filter(r => r.id !== recordId);
+    setSimulasiAtkRecords(updated);
+    StorageService.saveSimulasiAtkRecords(updated);
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.postToWebhook(webhook, 'delete_simulasi_atk', { id: recordId });
+    }
+  };
+
+  const handleDeleteCaseSimulasi = (nomorPerkara: string) => {
+    const norm = (nomorPerkara || '').trim().toLowerCase();
+    const updated = simulasiAtkRecords.filter(r => (r.nomorPerkara || '').trim().toLowerCase() !== norm);
+    setSimulasiAtkRecords(updated);
+    StorageService.saveSimulasiAtkRecords(updated);
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.pushSimulasiAtkToCloud(webhook, updated);
     }
   };
 
@@ -1658,6 +1802,14 @@ export default function App() {
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
   const countKasKuning = jurnalSkumRecords.filter(r => getEffectiveWarnaBaris(r) === 'kuning').length;
+  const pendingSimulasiAtkCount = cases.filter(c => {
+    const isPutus = c.status === 'Putus' || c.status === 'Selesai' || Boolean(c.tanggalPutus && c.tanggalPutus.trim());
+    if (!isPutus) return false;
+    const spent = simulasiAtkRecords
+      .filter(s => (s.nomorPerkara || '').trim().toLowerCase() === (c.nomorPerkara || '').trim().toLowerCase() && (s.pengeluaran || 0) > 0)
+      .reduce((a, b) => a + b.pengeluaran, 0);
+    return spent < 100000;
+  }).length;
   const isLight = theme === 'light';
 
   return (
@@ -1685,8 +1837,13 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         countKasKuning={countKasKuning}
+        pendingSimulasiAtkCount={pendingSimulasiAtkCount}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        onOpenCetakLaporanAtk={() => {
+          setActiveTab('simulasi-atk-ai');
+          setIsLaporanAtkModalOpen(true);
+        }}
       />
 
       {/* Main Container - Responsive layout adapting to full width */}
@@ -1702,6 +1859,21 @@ export default function App() {
             onDeleteRecord={handleDeleteJurnalSkumRecord}
             onNavigateToJurnal={() => setActiveTab('jurnal-skum')}
             theme={theme}
+          />
+        ) : activeTab === 'simulasi-atk-ai' ? (
+          <BukuBantuAtk
+            cases={cases}
+            jurnalSkum={jurnalSkumRecords}
+            simulasiAtkRecords={simulasiAtkRecords}
+            onSaveSimulasiAtkRecords={handleSaveSimulasiAtkRecords}
+            onAddSimulasiAtkRecord={handleAddSimulasiAtkRecord}
+            onDeleteSimulasiAtkRecord={handleDeleteSimulasiAtkRecord}
+            onDeleteCaseSimulasi={handleDeleteCaseSimulasi}
+            googleSheetWebhookUrl={getWebhookUrl(syncSettings)}
+            theme={theme}
+            isOpenReportModal={isLaporanAtkModalOpen}
+            onOpenReportModal={() => setIsLaporanAtkModalOpen(true)}
+            onCloseReportModal={() => setIsLaporanAtkModalOpen(false)}
           />
         ) : activeTab === 'jurnal-skum' ? (
           <JurnalBiayaSkumView

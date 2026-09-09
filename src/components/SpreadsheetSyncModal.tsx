@@ -129,6 +129,17 @@ function setupSheets() {
     ]);
     sheetKasOpname.getRange('A1:K1').setFontWeight('bold').setBackground('#c7d2fe');
   }
+
+  // 6. Sheet SimulasiAtkPerkara (Simulasi & Rincian Pengeluaran ATK Perkara AI)
+  var sheetSimAtk = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+  if (!sheetSimAtk) {
+    sheetSimAtk = ss.insertSheet('SimulasiAtkPerkara');
+    sheetSimAtk.appendRow([
+      'ID', 'Tanggal', 'Nomor Perkara', 'Uraian / Jenis ATK', 'Penerimaan / Debet',
+      'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'AI Generated', 'Created At'
+    ]);
+    sheetSimAtk.getRange('A1:J1').setFontWeight('bold').setBackground('#e9d5ff');
+  }
 }
 
 function doGet(e) {
@@ -374,6 +385,30 @@ function doGet(e) {
     }
   }
 
+  // Fetch SimulasiAtkPerkara (Simulasi ATK AI)
+  var sheetSimAtk = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+  var simulasiAtkList = [];
+  if (sheetSimAtk) {
+    var dataSimRows = sheetSimAtk.getDataRange().getValues();
+    for (var sa = 1; sa < dataSimRows.length; sa++) {
+      var rowSa = dataSimRows[sa];
+      if (rowSa[0] && String(rowSa[0]).trim() !== '') {
+        simulasiAtkList.push({
+          id: String(rowSa[0]),
+          tanggal: rowSa[1] ? (rowSa[1] instanceof Date ? Utilities.formatDate(rowSa[1], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(rowSa[1]).split('T')[0]) : '',
+          nomorPerkara: String(rowSa[2] || '-'),
+          uraian: String(rowSa[3] || ''),
+          penerimaan: Number(rowSa[4]) || 0,
+          pengeluaran: Number(rowSa[5]) || 0,
+          kategori: String(rowSa[6] || 'ATK Lainnya'),
+          keterangan: String(rowSa[7] || ''),
+          isAiGenerated: String(rowSa[8] || '').toLowerCase() === 'true' || String(rowSa[8] || '').toLowerCase() === 'ya',
+          createdAt: String(rowSa[9] || '')
+        });
+      }
+    }
+  }
+
   var response = {
     status: 'success',
     timestamp: new Date().toISOString(),
@@ -383,7 +418,8 @@ function doGet(e) {
     bukuBiayaProses: biayaProses,
     pinjamanSkum: pinjamanSkum,
     pinjamanSaldo: pinjamanSkum,
-    kasOpname: kasOpnameData
+    kasOpname: kasOpnameData,
+    simulasiAtk: simulasiAtkList
   };
 
   return ContentService.createTextOutput(JSON.stringify(response))
@@ -414,6 +450,9 @@ function doPost(e) {
       }
       if (payload.kasOpname) {
         writeKasOpnameToSheet(ss, payload.kasOpname);
+      }
+      if (payload.simulasiAtk && Array.isArray(payload.simulasiAtk)) {
+        writeSimulasiAtkToSheet(ss, payload.simulasiAtk);
       }
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Sync all complete' })).setMimeType(ContentService.MimeType.JSON);
     }
@@ -775,6 +814,85 @@ function doPost(e) {
           }
         }
       }
+    } else if (action === 'add_simulasi_atk' || action === 'update_simulasi_atk') {
+      var sheetSim = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+      if (!sheetSim) {
+        setupSheets();
+        sheetSim = ss.getSheetByName('SimulasiAtkPerkara');
+      }
+      var simRows = sheetSim.getDataRange().getValues();
+      var simRowIndex = -1;
+      var targetSimId = String(record.id || '').trim();
+      for (var si = 1; si < simRows.length; si++) {
+        if (targetSimId && String(simRows[si][0] || '').trim() === targetSimId) {
+          simRowIndex = si + 1;
+          break;
+        }
+      }
+      var simValues = [
+        record.id || ('sim-atk-' + Date.now()),
+        record.tanggal ? (record.tanggal instanceof Date ? Utilities.formatDate(record.tanggal, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(record.tanggal).split('T')[0]) : Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+        record.nomorPerkara || '-',
+        record.uraian || record.jenisAtk || '',
+        Number(record.penerimaan || record.debet) || 0,
+        Number(record.pengeluaran || record.kredit || record.jumlah) || 0,
+        record.kategori || 'ATK Lainnya',
+        record.keterangan || '',
+        record.isAiGenerated !== false ? 'TRUE' : 'FALSE',
+        record.createdAt || new Date().toISOString()
+      ];
+      if (simRowIndex > 1) {
+        sheetSim.getRange(simRowIndex, 1, 1, simValues.length).setValues([simValues]);
+      } else {
+        sheetSim.appendRow(simValues);
+      }
+    } else if (action === 'batch_add_simulasi_atk') {
+      var sheetSim = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+      if (!sheetSim) {
+        setupSheets();
+        sheetSim = ss.getSheetByName('SimulasiAtkPerkara');
+      }
+      var items = payload.items || payload.records || [];
+      if (Array.isArray(items) && items.length > 0) {
+        for (var bi = 0; bi < items.length; bi++) {
+          var itm = items[bi];
+          sheetSim.appendRow([
+            itm.id || ('sim-atk-' + Date.now() + '-' + bi),
+            itm.tanggal ? String(itm.tanggal).split('T')[0] : Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+            itm.nomorPerkara || '-',
+            itm.uraian || itm.jenisAtk || '',
+            Number(itm.penerimaan || itm.debet) || 0,
+            Number(itm.pengeluaran || itm.kredit || itm.jumlah) || 0,
+            itm.kategori || 'ATK Lainnya',
+            itm.keterangan || '',
+            itm.isAiGenerated !== false ? 'TRUE' : 'FALSE',
+            itm.createdAt || new Date().toISOString()
+          ]);
+        }
+      }
+    } else if (action === 'delete_simulasi_atk_case') {
+      var sheetSim = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+      if (sheetSim) {
+        var targetNo = String(record.nomorPerkara || '').trim().toLowerCase();
+        var sRows = sheetSim.getDataRange().getValues();
+        for (var di = sRows.length - 1; di >= 1; di--) {
+          if (String(sRows[di][2] || '').trim().toLowerCase() === targetNo) {
+            sheetSim.deleteRow(di + 1);
+          }
+        }
+      }
+    } else if (action === 'delete_simulasi_atk') {
+      var sheetSim = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+      if (sheetSim) {
+        var targetId = String(record.id || '').trim();
+        var sRows = sheetSim.getDataRange().getValues();
+        for (var di = 1; di < sRows.length; di++) {
+          if (targetId && String(sRows[di][0] || '').trim() === targetId) {
+            sheetSim.deleteRow(di + 1);
+            break;
+          }
+        }
+      }
     }
 
     return ContentService.createTextOutput(JSON.stringify({ status: 'success' }))
@@ -910,6 +1028,33 @@ function writeKasOpnameToSheet(ss, record) {
     String(record.catatan || ''),
     record.updatedAt || new Date().toISOString()
   ]);
+}
+
+function writeSimulasiAtkToSheet(ss, records) {
+  var sheet = ss.getSheetByName('SimulasiAtkPerkara') || ss.getSheetByName('SimulasiATK');
+  if (!sheet) {
+    sheet = ss.insertSheet('SimulasiAtkPerkara');
+  }
+  sheet.clearContents();
+  sheet.appendRow([
+    'ID', 'Tanggal', 'Nomor Perkara', 'Uraian / Jenis ATK', 'Penerimaan / Debet',
+    'Pengeluaran / Kredit', 'Kategori', 'Keterangan', 'AI Generated', 'Created At'
+  ]);
+  sheet.getRange('A1:J1').setFontWeight('bold').setBackground('#e9d5ff');
+  records.forEach(function(r) {
+    sheet.appendRow([
+      r.id || ('sim-atk-' + Date.now()),
+      r.tanggal ? (r.tanggal instanceof Date ? Utilities.formatDate(r.tanggal, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(r.tanggal).split('T')[0]) : '',
+      r.nomorPerkara || '-',
+      r.uraian || r.jenisAtk || '',
+      Number(r.penerimaan || r.debet) || 0,
+      Number(r.pengeluaran || r.kredit || r.jumlah) || 0,
+      r.kategori || 'ATK Lainnya',
+      r.keterangan || '',
+      r.isAiGenerated !== false ? 'TRUE' : 'FALSE',
+      r.createdAt || new Date().toISOString()
+    ]);
+  });
 }`;
 
 
