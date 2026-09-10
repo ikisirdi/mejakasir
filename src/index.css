@@ -1,1 +1,68 @@
 @import "tailwindcss";
+
+/* ==========================================================================
+   PRINT STYLES FOR OFFICIAL COURT REPORTS (PENGADILAN AGAMA)
+   Mendukung Cetak Berwarna Penuh (Exact Color Adjust) & Multi-Page Pagination
+   ========================================================================== */
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Sembunyikan elemen latar belakang jika modal laporan resmi sedang dicetak */
+  body.printing-modal-active > *:not(#print-mount-target):not([data-headlessui-portal]) {
+    display: none !important;
+  }
+
+  /* Hilangkan backdrop gelap modal saat cetak */
+  [data-headlessui-portal] > div > div:first-child {
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+
+  /* Reset modal box agar mengalir penuh sebagai halaman dokumen */
+  .printable-document-container {
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hindari pemotongan tabel di tengah baris */
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  .avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
