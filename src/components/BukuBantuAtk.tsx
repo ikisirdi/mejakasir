@@ -2,12 +2,20 @@ import React, { useState, useMemo } from 'react';
 import { 
   Sparkles, Plus, Trash2, Edit3, Search, Filter, 
   Download, Printer, RefreshCw, FileText, CheckCircle2, 
-  AlertTriangle, Eye, Code, Copy, Check, X, Calendar, ArrowUpDown, CloudUpload
+  AlertTriangle, Eye, Code, Copy, Check, X, Calendar, ArrowUpDown, CloudUpload,
+  Boxes, PackageCheck, Layers, PieChart, Info
 } from 'lucide-react';
 import { CaseRecord, SimulasiAtkRecord, JurnalBiayaSkumRecord } from '../types';
 import { ATK_REFERENCE_ITEMS, generateAtkSimulationDeterministic } from '../data/atkRubric';
 import { SyncService } from '../services/syncService';
 import { LaporanResmiAtkModal } from './LaporanResmiAtkModal';
+import { 
+  calculateAtkInventoryUsage, 
+  exportAtkInventoryToCsv, 
+  downloadAtkInventoryCsv,
+  AtkInventorySummary, 
+  MASTER_PERSEDIAAN_ATK 
+} from '../utils/atkInventoryCalculation';
 
 interface BukuBantuAtkProps {
   cases: CaseRecord[];
@@ -40,17 +48,26 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
 }) => {
   const isLight = theme === 'light';
 
-  // View mode: 'ringkasan-perkara' | 'buku-jurnal' | 'tabel-acuan'
-  const [viewMode, setViewMode] = useState<'ringkasan-perkara' | 'buku-jurnal' | 'tabel-acuan'>('ringkasan-perkara');
+  // View mode: 'ringkasan-perkara' | 'buku-jurnal' | 'rekap-persediaan' | 'tabel-acuan'
+  const [viewMode, setViewMode] = useState<'ringkasan-perkara' | 'buku-jurnal' | 'rekap-persediaan' | 'tabel-acuan'>('ringkasan-perkara');
 
   // Print Report modal state
   const [showPrintReportModal, setShowPrintReportModal] = useState<boolean>(false);
+  const [reportModalType, setReportModalType] = useState<'buku-kas' | 'rekap-persediaan'>('buku-kas');
+  const [reportModalFilterCase, setReportModalFilterCase] = useState<string>('all');
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'putus-belum-nol' | 'putus-sudah-nol' | 'aktif'>('all');
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [selectedYear, setSelectedYear] = useState<string>('2026');
+
+  // Rekap Persediaan specific filters
+  const [inventoryCaseFilter, setInventoryCaseFilter] = useState<string>('all');
+  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState<string>('all');
+
+  // Detail drawer tab: 'transaksi' vs 'persediaan'
+  const [caseDetailTab, setCaseDetailTab] = useState<'transaksi' | 'persediaan'>('transaksi');
 
   // Modal states
   const [showSimulateModal, setShowSimulateModal] = useState(false);
@@ -248,6 +265,38 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
       return a.createdAt.localeCompare(b.createdAt);
     });
   }, [allLedgerRecords, searchQuery, selectedMonth, selectedYear]);
+
+  // Calculation of aggregated ATK Inventory consumption (persediaan barang habis pakai)
+  const inventorySummary = useMemo<AtkInventorySummary>(() => {
+    // Saring simulasi records berdasarkan filter periode aktif
+    const filtered = simulasiAtkRecords.filter(r => {
+      if (!r.tanggal) return false;
+      const parts = r.tanggal.split('-');
+      if (selectedYear !== 'all' && parts[0] !== selectedYear) return false;
+      if (selectedMonth !== 'all' && parts[1] !== selectedMonth) return false;
+      return true;
+    });
+
+    return calculateAtkInventoryUsage(filtered, inventoryCaseFilter);
+  }, [simulasiAtkRecords, selectedMonth, selectedYear, inventoryCaseFilter]);
+
+  const filteredInventoryItems = useMemo(() => {
+    let list = inventorySummary.items;
+    if (inventoryCategoryFilter !== 'all') {
+      list = list.filter(it => it.kategori.toLowerCase() === inventoryCategoryFilter.toLowerCase());
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(it =>
+        it.namaBarang.toLowerCase().includes(q) ||
+        it.kodeBarang.toLowerCase().includes(q) ||
+        it.kategori.toLowerCase().includes(q) ||
+        it.satuan.toLowerCase().includes(q) ||
+        (it.keterangan || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [inventorySummary, inventoryCategoryFilter, searchQuery]);
 
   // Open modal for AI Simulation of a single case
   const handleOpenSimulateModal = (c: CaseRecord) => {
@@ -630,6 +679,7 @@ if (sheetSimAtk) {
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
+                setReportModalType('buku-kas');
                 if (onOpenReportModal) {
                   onOpenReportModal();
                 } else {
@@ -640,7 +690,20 @@ if (sheetSimAtk) {
               title="Cetak Laporan Resmi Buku Pembantu ATK (Perbulan / Pertahun) - Format Resmi Pengadilan Agama"
             >
               <Printer className="w-4 h-4" />
-              <span>Cetak Laporan Resmi ATK</span>
+              <span>Cetak Buku Kas ATK</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setReportModalType('rekap-persediaan');
+                setReportModalFilterCase(inventoryCaseFilter);
+                setShowPrintReportModal(true);
+              }}
+              className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/30 flex items-center space-x-1.5 transition-all transform active:scale-95"
+              title="Cetak Rekapitulasi Persediaan Barang ATK yang Digunakan untuk Perkara"
+            >
+              <Boxes className="w-4 h-4" />
+              <span>Cetak Rekap Persediaan</span>
             </button>
 
             <button
@@ -808,6 +871,17 @@ if (sheetSimAtk) {
               <span>📖 Buku Kas / Jurnal ATK ({filteredLedgerRecords.length})</span>
             </button>
             <button
+              onClick={() => setViewMode('rekap-persediaan')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                viewMode === 'rekap-persediaan'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Boxes className="w-3.5 h-3.5" />
+              <span>📦 Rekap Persediaan ({inventorySummary.totalJenisBarang} Item)</span>
+            </button>
+            <button
               onClick={() => setViewMode('tabel-acuan')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
                 viewMode === 'tabel-acuan'
@@ -815,7 +889,7 @@ if (sheetSimAtk) {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span>📋 Tabel Acuan Resmi (13 Item)</span>
+              <span>📋 Acuan Standar ATK</span>
             </button>
           </div>
 
@@ -1224,6 +1298,329 @@ if (sheetSimAtk) {
         </div>
       )}
 
+      {/* VIEW: REKAPITULASI & KALKULASI PERSEDIAAN BARANG ATK */}
+      {viewMode === 'rekap-persediaan' && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Header & Controls Panel */}
+          <div className={`p-4 rounded-2xl border transition-all ${
+            isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
+          }`}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-200/70">
+              <div className="flex items-start space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 shadow-2xs">
+                  <Boxes className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h2 className="font-black text-base text-slate-800 dark:text-slate-100">
+                      Kalkulasi & Rekapitulasi Persediaan Barang ATK
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      Agregasi Otomatis
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Menghitung total volume fisik barang persediaan habis pakai (kertas, map, tinta, materai, dll.) yang dikeluarkan untuk penanganan perkara.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => {
+                    downloadAtkInventoryCsv(
+                      inventorySummary,
+                      'Pengadilan Negeri / Agama',
+                      inventoryCaseFilter === 'all' 
+                        ? 'Semua Perkara (Konsolidasi)' 
+                        : `Perkara ${inventoryCaseFilter}`
+                    );
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center space-x-1.5 transition-all ${
+                    isLight 
+                      ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 shadow-xs' 
+                      : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+                  }`}
+                  title="Unduh data kalkulasi persediaan barang dalam format CSV/Excel"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Unduh CSV</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setReportModalType('rekap-persediaan');
+                    setReportModalFilterCase(inventoryCaseFilter);
+                    setShowPrintReportModal(true);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-700 text-white flex items-center space-x-1.5 shadow-md shadow-purple-600/30 transition-all transform active:scale-95"
+                  title="Buka Cetak Laporan Resmi Rekapitulasi Persediaan ATK"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Cetak Rekap Persediaan</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filters Row */}
+            <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Filter Perkara
+                </label>
+                <select
+                  value={inventoryCaseFilter}
+                  onChange={(e) => setInventoryCaseFilter(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
+                    isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  <option value="all">📁 Semua Perkara (Konsolidasi)</option>
+                  {cases.map((c) => (
+                    <option key={c.id} value={c.nomorPerkara}>
+                      ⚖️ {c.nomorPerkara} - {c.namaPihak || 'Pihak'} ({c.status || 'Berjalan'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Kategori Barang
+                </label>
+                <select
+                  value={inventoryCategoryFilter}
+                  onChange={(e) => setInventoryCategoryFilter(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-xl text-xs font-semibold border ${
+                    isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  <option value="all">Semua Kategori</option>
+                  <option value="Kertas">Kertas</option>
+                  <option value="Map">Map & Sampul</option>
+                  <option value="Tinta">Tinta & Ribbon</option>
+                  <option value="Materai & Pos">Materai & Pos</option>
+                  <option value="Alat Tulis">Alat Tulis</option>
+                  <option value="Buku Register">Buku Register & Jurnal</option>
+                </select>
+              </div>
+
+              <div className="sm:col-span-2 flex items-end">
+                <div className="relative w-full">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Cari kode barang, nama ATK, satuan..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className={`w-full pl-9 pr-8 py-2 rounded-xl text-xs border ${
+                      isLight 
+                        ? 'bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:border-purple-500' 
+                        : 'bg-slate-800 border-slate-700 text-slate-100 focus:bg-slate-900 focus:border-purple-500'
+                    }`}
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Metric Summary Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className={`p-4 rounded-2xl border transition-all ${
+              isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex items-center space-x-2 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                <PackageCheck className="w-4 h-4 text-purple-600" />
+                <span>Jenis Barang ATK</span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-1.5">
+                <span className="text-2xl font-black text-slate-900 dark:text-slate-100 font-mono">
+                  {inventorySummary.totalJenisBarang}
+                </span>
+                <span className="text-xs font-bold text-slate-500">item persediaan</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {filteredInventoryItems.length} item sesuai filter pencarian
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-2xl border transition-all ${
+              isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex items-center space-x-2 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                <Layers className="w-4 h-4 text-indigo-600" />
+                <span>Total Volume Fisik</span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-1.5">
+                <span className="text-2xl font-black text-indigo-700 dark:text-indigo-400 font-mono">
+                  {inventorySummary.totalKuantitasSemua.toLocaleString('id-ID')}
+                </span>
+                <span className="text-xs font-bold text-slate-500">satuan barang</span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Rim, Lembar, Buah, Keping, Botol
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-2xl border transition-all ${
+              isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex items-center space-x-2 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                <Sparkles className="w-4 h-4 text-rose-600" />
+                <span>Total Nilai Pemakaian</span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-1.5">
+                <span className="text-2xl font-black text-rose-600 font-mono">
+                  {formatRp(inventorySummary.totalNominal)}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Akumulasi biaya persediaan terpakai
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-2xl border transition-all ${
+              isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
+            }`}>
+              <div className="flex items-center space-x-2 text-slate-500 text-xs font-bold uppercase tracking-wider">
+                <PieChart className="w-4 h-4 text-emerald-600" />
+                <span>Cakupan Pemakaian</span>
+              </div>
+              <div className="mt-2 flex items-baseline space-x-1.5">
+                <span className="text-2xl font-black text-emerald-700 dark:text-emerald-400 font-mono">
+                  {inventoryCaseFilter === 'all' 
+                    ? new Set(inventorySummary.items.flatMap(it => it.daftarPerkara.map(p => p.nomorPerkara))).size 
+                    : '1'}
+                </span>
+                <span className="text-xs font-bold text-slate-500">
+                  {inventoryCaseFilter === 'all' ? 'perkara tercakup' : 'perkara terpilih'}
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500 truncate">
+                {inventoryCaseFilter === 'all' 
+                  ? `${inventorySummary.items.reduce((acc, it) => acc + it.frekuensiDipakai, 0)} transaksi dicatat` 
+                  : inventoryCaseFilter}
+              </p>
+            </div>
+          </div>
+
+          {/* Table of Calculated Inventory Items */}
+          <div className={`rounded-2xl border overflow-hidden transition-all ${
+            isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
+          }`}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <h3 className="font-extrabold text-sm text-slate-800 dark:text-slate-100">
+                  Rincian Persediaan Barang ATK Terpakai
+                </h3>
+                <span className="text-xs text-slate-400">
+                  ({filteredInventoryItems.length} jenis barang)
+                </span>
+              </div>
+              <div className="text-xs font-mono font-bold text-purple-700 dark:text-purple-300">
+                Plafon Standar: Rp 100.000,- / perkara
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className={`border-b font-extrabold uppercase tracking-wider text-[11px] ${
+                    isLight ? 'bg-slate-50 text-slate-600 border-slate-200' : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}>
+                    <th className="py-3 px-4 w-12 text-center">No</th>
+                    <th className="py-3 px-4 w-28">Kode Barang</th>
+                    <th className="py-3 px-4">Nama Barang Persediaan & Spesifikasi</th>
+                    <th className="py-3 px-4">Kategori</th>
+                    <th className="py-3 px-4 text-center">Satuan</th>
+                    <th className="py-3 px-4 text-right">Harga Satuan (Rp)</th>
+                    <th className="py-3 px-4 text-right">Volume Terpakai</th>
+                    <th className="py-3 px-4 text-right">Total Nilai (Rp)</th>
+                    <th className="py-3 px-4 text-center">Frekuensi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/60">
+                  {filteredInventoryItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-12 text-center text-slate-400 font-medium">
+                        Tidak ada barang persediaan yang terdata pada kriteria filter ini.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredInventoryItems.map((item, idx) => (
+                      <tr key={item.kodeBarang} className="hover:bg-purple-50/30 transition-colors">
+                        <td className="py-3 px-4 text-center text-slate-400 font-bold">{idx + 1}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[11px] border border-slate-200 dark:border-slate-700">
+                            {item.kodeBarang}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-extrabold text-slate-900 dark:text-slate-100">
+                            {item.namaBarang}
+                          </div>
+                          {item.keterangan && (
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {item.keterangan}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                            {item.kategori}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-slate-700 dark:text-slate-300">
+                          {item.satuan}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-600 dark:text-slate-300">
+                          {formatRp(item.hargaSatuan)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-extrabold text-indigo-700 dark:text-indigo-400">
+                          {item.totalKuantitas.toLocaleString('id-ID')} <span className="text-[10px] font-normal text-slate-400">{item.satuan}</span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-black text-rose-600 text-sm">
+                          {formatRp(item.totalNominal)}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-700">
+                            {item.frekuensiDipakai}x
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className={`border-t font-black text-xs ${
+                    isLight ? 'bg-purple-50 text-purple-950 border-purple-200' : 'bg-slate-800 text-white border-slate-700'
+                  }`}>
+                    <td colSpan={6} className="py-3 px-4 text-right uppercase tracking-wider">
+                      TOTAL PENGELUARAN PERSEDIAAN ATK :
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-indigo-800 dark:text-indigo-300 font-bold">
+                      {inventorySummary.totalKuantitasSemua.toLocaleString('id-ID')} Satuan
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-base text-rose-700 dark:text-rose-400">
+                      {formatRp(inventorySummary.totalNominal)}
+                    </td>
+                    <td className="py-3 px-4 text-center text-[10px] font-bold text-emerald-700">
+                      {inventorySummary.items.reduce((acc, it) => acc + it.frekuensiDipakai, 0)} Transaksi
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* VIEW 3: TABEL ACUAN RESMI ATK (13 ITEM DARI PENGGUNA) */}
       {viewMode === 'tabel-acuan' && (
         <div className={`rounded-2xl border overflow-hidden transition-all ${
@@ -1616,6 +2013,7 @@ if (sheetSimAtk) {
         const fin = caseFinancials.find(f => (f.caseRecord.nomorPerkara || '').trim().toLowerCase() === targetNo);
         const totalMasukCase = fin ? fin.totalMasuk : 100000;
         const sisaSaldoCase = totalMasukCase - totalPengeluaranCase;
+        const caseInventory = calculateAtkInventoryUsage(caseSimRecords, inspectCase.nomorPerkara);
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
@@ -1624,7 +2022,7 @@ if (sheetSimAtk) {
             }`}>
               <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-purple-600 text-white">
                 <div>
-                  <h3 className="font-extrabold text-sm">Rincian Transaksi ATK: {inspectCase.nomorPerkara}</h3>
+                  <h3 className="font-extrabold text-sm">Rincian Transaksi & Persediaan ATK: {inspectCase.nomorPerkara}</h3>
                   <p className="text-[11px] text-purple-100">{inspectCase.namaPihak} • Status: {inspectCase.status || 'Berjalan'}</p>
                 </div>
                 <button onClick={() => setInspectCase(null)} className="text-purple-200 hover:text-white">
@@ -1650,14 +2048,40 @@ if (sheetSimAtk) {
                 </div>
               </div>
 
-              <div className="p-4 overflow-y-auto space-y-3">
+              {/* Tab Selector Inside Drawer */}
+              <div className="flex items-center px-4 pt-2 border-b border-slate-200 bg-slate-50 gap-2">
+                <button
+                  onClick={() => setCaseDetailTab('transaksi')}
+                  className={`px-3 py-1.5 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 ${
+                    caseDetailTab === 'transaksi'
+                      ? 'border-purple-600 text-purple-700 bg-white rounded-t-lg'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>16 Transaksi Kronologis ({caseSimRecords.length})</span>
+                </button>
+                <button
+                  onClick={() => setCaseDetailTab('persediaan')}
+                  className={`px-3 py-1.5 text-xs font-bold border-b-2 transition-all flex items-center space-x-1.5 ${
+                    caseDetailTab === 'persediaan'
+                      ? 'border-purple-600 text-purple-700 bg-white rounded-t-lg'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Boxes className="w-3.5 h-3.5" />
+                  <span>Kalkulasi Persediaan Terpakai ({caseInventory.totalJenisBarang} Item)</span>
+                </button>
+              </div>
+
+              <div className="p-4 overflow-y-auto space-y-3 flex-1">
                 {caseSimRecords.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 text-xs">
                     <Sparkles className="w-8 h-8 text-purple-300 mx-auto mb-2 opacity-60" />
                     <p className="font-bold text-slate-600">Belum ada rincian transaksi ATK yang tersimpan.</p>
                     <p className="text-[11px] mt-1">Klik tombol &quot;Simulasi Ulang AI&quot; di bawah untuk men-generate otomatis.</p>
                   </div>
-                ) : (
+                ) : caseDetailTab === 'transaksi' ? (
                   <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <table className="w-full text-left text-xs">
                       <thead>
@@ -1673,7 +2097,7 @@ if (sheetSimAtk) {
                         {caseSimRecords.map((r, idx) => (
                           <tr key={r.id} className="hover:bg-purple-50/40">
                             <td className="p-2.5 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
-                            <td className="p-2.5 font-mono text-slate-600">{r.tanggal}</td>
+                            <td className="p-2.5 font-mono text-slate-600 whitespace-nowrap">{r.tanggal}</td>
                             <td className="p-2.5 font-bold text-slate-800">
                               <div>{r.uraian}</div>
                               {r.keterangan && <div className="text-[10px] text-slate-400 font-normal">{r.keterangan}</div>}
@@ -1689,20 +2113,72 @@ if (sheetSimAtk) {
                       </tbody>
                     </table>
                   </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 border-b font-bold text-slate-600">
+                          <th className="p-2.5 w-8 text-center">No</th>
+                          <th className="p-2.5">Nama Barang Persediaan ATK</th>
+                          <th className="p-2.5 text-center">Satuan</th>
+                          <th className="p-2.5 text-right">Volume</th>
+                          <th className="p-2.5 text-right">Harga (Rp)</th>
+                          <th className="p-2.5 text-right">Total (Rp)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {caseInventory.items.map((it, idx) => (
+                          <tr key={it.kodeBarang} className="hover:bg-purple-50/40">
+                            <td className="p-2.5 text-center text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                            <td className="p-2.5 font-bold text-slate-800">
+                              <div>{it.namaBarang}</div>
+                              <span className="text-[10px] text-purple-700 bg-purple-50 px-1 rounded">{it.kategori}</span>
+                            </td>
+                            <td className="p-2.5 text-center text-slate-600 font-semibold">{it.satuan}</td>
+                            <td className="p-2.5 text-right font-mono font-bold text-indigo-700">{it.totalKuantitas}</td>
+                            <td className="p-2.5 text-right font-mono text-slate-600">{formatRp(it.hargaSatuan)}</td>
+                            <td className="p-2.5 text-right font-mono font-black text-rose-600">{formatRp(it.totalNominal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-purple-50 border-t font-black text-xs">
+                          <td colSpan={5} className="p-2.5 text-right uppercase text-purple-950">Total Nilai Persediaan Perkara Ini :</td>
+                          <td className="p-2.5 text-right font-mono text-rose-700 font-black">{formatRp(caseInventory.totalNominal)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 )}
               </div>
-              <div className="p-3 border-t border-slate-200 flex items-center justify-between bg-slate-50">
-                <button
-                  onClick={() => {
-                    const c = inspectCase;
-                    setInspectCase(null);
-                    handleOpenSimulateModal(c);
-                  }}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center space-x-1.5 shadow-xs"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Simulasi Ulang AI</span>
-                </button>
+              <div className="p-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 bg-slate-50">
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => {
+                      const c = inspectCase;
+                      setInspectCase(null);
+                      handleOpenSimulateModal(c);
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center space-x-1.5 shadow-xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Simulasi Ulang AI</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setReportModalType('rekap-persediaan');
+                      setReportModalFilterCase(inspectCase.nomorPerkara);
+                      setShowPrintReportModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center space-x-1.5 shadow-xs"
+                    title="Cetak format cetak resmi rekapitulasi persediaan khusus untuk perkara ini"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Cetak Rekap Persediaan</span>
+                  </button>
+                </div>
+
                 <div className="flex items-center space-x-2">
                   {googleSheetWebhookUrl && caseSimRecords.length > 0 && (
                     <button
@@ -1716,10 +2192,10 @@ if (sheetSimAtk) {
                         }
                         setTimeout(() => setSyncStatusMsg(null), 5000);
                       }}
-                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center space-x-1"
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center space-x-1"
                     >
                       <CloudUpload className="w-3.5 h-3.5" />
-                      <span>Sinkronkan ke Sheet</span>
+                      <span>Sinkron ke Sheet</span>
                     </button>
                   )}
                   <button
@@ -1748,6 +2224,8 @@ if (sheetSimAtk) {
         theme={theme}
         initialMonth={selectedMonth}
         initialYear={selectedYear}
+        initialReportType={reportModalType}
+        initialFilterPerkara={reportModalFilterCase}
       />
 
     </div>

@@ -5,15 +5,22 @@ import {
   Download, 
   X, 
   Calendar, 
-  FileSpreadsheet, 
   SlidersHorizontal,
   Building2,
   ExternalLink,
   Palette,
   Check,
-  FileText
+  FileText,
+  Boxes,
+  BookOpen,
+  Filter
 } from 'lucide-react';
 import { CaseRecord, SimulasiAtkRecord } from '../types';
+import { 
+  calculateAtkInventoryUsage, 
+  exportAtkInventoryToCsv, 
+  AtkInventorySummary 
+} from '../utils/atkInventoryCalculation';
 
 interface LaporanResmiAtkModalProps {
   isOpen: boolean;
@@ -24,6 +31,8 @@ interface LaporanResmiAtkModalProps {
   theme?: 'light' | 'dark';
   initialMonth?: string; // '01' - '12' or 'all'
   initialYear?: string;  // '2026', '2025', etc. or 'all'
+  initialReportType?: 'buku-kas' | 'rekap-persediaan';
+  initialFilterPerkara?: string;
 }
 
 export const MONTH_LABELS: { [key: string]: string } = {
@@ -49,15 +58,21 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   googleSheetWebhookUrl,
   theme = 'light',
   initialMonth = 'all',
-  initialYear = '2026'
+  initialYear = '2026',
+  initialReportType = 'buku-kas',
+  initialFilterPerkara = 'all'
 }) => {
   const isLight = theme === 'light';
   const printContentRef = useRef<HTMLDivElement>(null);
+
+  // Report Type State: 'buku-kas' (Buku Kas ATK) vs 'rekap-persediaan' (Rekapitulasi Persediaan Barang Digunakan)
+  const [reportType, setReportType] = useState<'buku-kas' | 'rekap-persediaan'>(initialReportType);
 
   // Filter States
   const [selectedMonth, setSelectedMonth] = useState<string>(initialMonth);
   const [selectedYear, setSelectedYear] = useState<string>(initialYear);
   const [filterPerkaraStatus, setFilterPerkaraStatus] = useState<'all' | 'putus' | 'aktif'>('all');
+  const [filterNomorPerkara, setFilterNomorPerkara] = useState<string>(initialFilterPerkara);
   const [showConfig, setShowConfig] = useState<boolean>(false);
 
   // Print Mode & Page Setup States
@@ -88,6 +103,18 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
   // Format rupiah helper
   const formatRp = (val: number) => `Rp ${Number(val || 0).toLocaleString('id-ID')}`;
+
+  // Daftar nomor perkara unik untuk filter
+  const distinctCaseNumbers = useMemo(() => {
+    const set = new Set<string>();
+    simulasiAtkRecords.forEach(s => {
+      if (s.nomorPerkara) set.add(s.nomorPerkara.trim());
+    });
+    cases.forEach(c => {
+      if (c.nomorPerkara) set.add(c.nomorPerkara.trim());
+    });
+    return Array.from(set).sort();
+  }, [simulasiAtkRecords, cases]);
 
   // 1. Gabungkan seluruh entri kas ATK secara kronologis
   const allLedgerItems = useMemo(() => {
@@ -151,12 +178,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       const timeA = new Date(a.tanggal).getTime() || 0;
       const timeB = new Date(b.tanggal).getTime() || 0;
       if (timeA !== timeB) return timeA - timeB;
-      // Jika tanggal sama, penerimaan ditaruh sebelum pengeluaran
       return b.penerimaan - a.penerimaan;
     });
   }, [cases, simulasiAtkRecords]);
 
-  // 2. Filter berdasarkan Bulan, Tahun, dan Status Perkara
+  // 2. Filter berdasarkan Bulan, Tahun, Status Perkara, dan Filter Perkara
   const filteredLedger = useMemo(() => {
     return allLedgerItems.filter(item => {
       if (!item.tanggal) return false;
@@ -166,6 +192,10 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
       if (selectedYear !== 'all' && itemYear !== selectedYear) return false;
       if (selectedMonth !== 'all' && itemMonth !== selectedMonth) return false;
+
+      if (filterNomorPerkara !== 'all' && item.nomorPerkara.trim().toLowerCase() !== filterNomorPerkara.trim().toLowerCase()) {
+        return false;
+      }
 
       if (filterPerkaraStatus === 'putus') {
         const isPutus = item.statusPerkara === 'Putus' || item.statusPerkara === 'Selesai' || item.statusPerkara === 'Minutasi' || item.statusPerkara === 'Arsip';
@@ -177,9 +207,9 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
       return true;
     });
-  }, [allLedgerItems, selectedMonth, selectedYear, filterPerkaraStatus]);
+  }, [allLedgerItems, selectedMonth, selectedYear, filterPerkaraStatus, filterNomorPerkara]);
 
-  // 3. Hitung running balance (saldo berjalan) dan agregat finansial
+  // 3. Hitung running balance (saldo berjalan) dan agregat finansial buku kas
   const { ledgerWithBalance, totalPenerimaan, totalPengeluaran, saldoAkhir, countSimulasi } = useMemo(() => {
     let running = 0;
     let totPenerimaan = 0;
@@ -208,7 +238,23 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     };
   }, [filteredLedger]);
 
-  // 4. Rekapitulasi per Kategori Pengeluaran ATK
+  // 4. Kalkulasi Persediaan Barang yang Digunakan (Inventory Supplies Calculation)
+  // Menghitung kuantitas/volume, harga satuan, dan total pemakaian barang persediaan
+  // Mengagregasi item jenis ATK yang sama untuk sebuah perkara atau seluruh perkara!
+  const inventorySummary: AtkInventorySummary = useMemo(() => {
+    // Saring simulasi records berdasarkan filter bulan & tahun
+    const filteredSim = simulasiAtkRecords.filter(s => {
+      if (!s.tanggal) return false;
+      const parts = s.tanggal.split('-');
+      if (selectedYear !== 'all' && parts[0] !== selectedYear) return false;
+      if (selectedMonth !== 'all' && parts[1] !== selectedMonth) return false;
+      return true;
+    });
+
+    return calculateAtkInventoryUsage(filteredSim, filterNomorPerkara);
+  }, [simulasiAtkRecords, selectedMonth, selectedYear, filterNomorPerkara]);
+
+  // 5. Rekapitulasi per Kategori Pengeluaran ATK (untuk Buku Kas)
   const categoryBreakdown = useMemo(() => {
     const summary: { [key: string]: { total: number; count: number } } = {
       'Map': { total: 0, count: 0 },
@@ -253,16 +299,19 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     ? `BULAN ${MONTH_LABELS[selectedMonth]?.toUpperCase() || selectedMonth} ${selectedYear !== 'all' ? selectedYear : ''}` 
     : (selectedYear !== 'all' ? `TAHUN ${selectedYear}` : 'SEMUA PERIODE');
 
+  const filterPerkaraLabel = filterNomorPerkara !== 'all'
+    ? ` • PERKARA: ${filterNomorPerkara}`
+    : '';
+
   // =========================================================================
   // GENERATOR HTML LAPORAN DOKUMEN CETAK RESMI
-  // Menghasilkan dokumen HTML lengkap yang bersih, mendukung warna penuh atau B&W,
-  // serta bebas dari batas viewport iframe atau scrollbar modal screenshot!
+  // Mendukung Cetak Buku Kas ATK maupun Rekapitulasi Persediaan Barang Digunakan
+  // Warna penuh sistem, multi-halaman bersih, bebas scrollbar modal screenshot!
   // =========================================================================
   const generateCleanPrintHtml = (isColor: boolean): string => {
-    const isPortrait = paperOrientation === 'portrait';
     const paperSizeCss = paperSize === 'f4' ? '215mm 330mm' : paperSize === 'legal' ? '8.5in 14in' : 'A4';
     
-    // Palet Warna: Berwarna Penuh (Sesuai Sistem) vs Monokrom
+    // Palet Warna: Berwarna Penuh vs Monokrom
     const cDebet = isColor ? '#047857' : '#0f172a';
     const cKredit = isColor ? '#b91c1c' : '#0f172a';
     const cSaldo = isColor ? '#6d28d9' : '#0f172a';
@@ -273,43 +322,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     const badgeTextSync = isColor ? '#6b21a8' : '#0f172a';
     const badgeBgPanjar = isColor ? '#d1fae5' : '#f1f5f9';
     const badgeTextPanjar = isColor ? '#065f46' : '#0f172a';
-
-    const tableRowsHtml = ledgerWithBalance.length === 0 
-      ? `<tr><td colspan="8" style="padding: 24px; text-align: center; color: #64748b; font-style: italic;">Tidak ada data transaksi ATK pada periode yang dipilih (${periodeTeks}).</td></tr>`
-      : ledgerWithBalance.map(r => `
-          <tr style="border-bottom: 1px solid ${borderCol}; page-break-inside: avoid;">
-            <td style="padding: 6px 8px; text-align: center; font-weight: 700; border-right: 1px solid ${borderCol};">${r.no}</td>
-            <td style="padding: 6px 8px; text-align: center; font-family: monospace; white-space: nowrap; border-right: 1px solid ${borderCol};">${r.tanggal}</td>
-            <td style="padding: 6px 8px; font-family: monospace; font-weight: 700; white-space: nowrap; border-right: 1px solid ${borderCol};">${r.nomorPerkara}</td>
-            <td style="padding: 6px 8px; border-right: 1px solid ${borderCol};">
-              <div style="font-weight: 600;">${r.uraian}</div>
-              <div style="font-size: 9px; color: #64748b; margin-top: 2px;">Pihak: ${r.namaPihak} • Kat: ${r.kategori}</div>
-            </td>
-            <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 700; color: ${cDebet}; border-right: 1px solid ${borderCol};">
-              ${r.penerimaan > 0 ? formatRp(r.penerimaan) : '-'}
-            </td>
-            <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 700; color: ${cKredit}; border-right: 1px solid ${borderCol};">
-              ${r.pengeluaran > 0 ? formatRp(r.pengeluaran) : '-'}
-            </td>
-            <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 800; color: ${cSaldo}; border-right: 1px solid ${borderCol};">
-              ${formatRp(r.saldo)}
-            </td>
-            <td style="padding: 6px 8px; text-align: center; white-space: nowrap;">
-              ${r.isAiGenerated 
-                ? `<span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 8.5px; font-weight: 700; background: ${badgeBgSync}; color: ${badgeTextSync}; border: 1px solid ${isColor ? '#d8b4fe' : '#cbd5e1'};">✓ Sinkron Spreadsheet</span>`
-                : `<span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 8.5px; font-weight: 700; background: ${badgeBgPanjar}; color: ${badgeTextPanjar}; border: 1px solid ${isColor ? '#a7f3d0' : '#cbd5e1'};">✓ Penerimaan Panjar</span>`
-              }
-            </td>
-          </tr>
-        `).join('');
-
-    const categoryColsHtml = (Object.entries(categoryBreakdown) as [string, { total: number; count: number }][]).map(([cat, d]) => `
-      <div style="flex: 1; min-width: 90px; text-align: center; padding: 6px 4px; border-right: 1px solid ${borderCol};">
-        <div style="font-size: 9.5px; font-weight: 700; color: #475569; text-transform: uppercase;">${cat}</div>
-        <div style="font-family: monospace; font-weight: 800; font-size: 11px; margin-top: 2px; color: ${isColor ? '#1e293b' : '#000000'};">${formatRp(d.total)}</div>
-        <div style="font-size: 8.5px; color: #64748b;">${d.count} item</div>
-      </div>
-    `).join('');
 
     // Signatures layout
     let signaturesHtml = '';
@@ -332,7 +344,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
           </div>
           <div style="flex: 1; padding: 0 10px;">
             <div style="color: #334155;">Dibuat Oleh,</div>
-            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola ATK Perkara</div>
+            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola Persediaan ATK</div>
             <div style="height: 65px;"></div>
             <div style="font-weight: 800; text-decoration: underline;">${kasirNama}</div>
             <div style="font-size: 10px; font-family: monospace; color: #475569;">${kasirNip}</div>
@@ -351,7 +363,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
           </div>
           <div style="flex: 1; padding: 0 20px;">
             <div style="color: #334155;">Dibuat Oleh,</div>
-            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola ATK Perkara</div>
+            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola Persediaan ATK</div>
             <div style="height: 65px;"></div>
             <div style="font-weight: 800; text-decoration: underline;">${kasirNama}</div>
             <div style="font-size: 10px; font-family: monospace; color: #475569;">${kasirNip}</div>
@@ -363,7 +375,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
         <div style="display: flex; justify-content: flex-end; text-align: center; margin-top: 20px; page-break-inside: avoid;">
           <div style="width: 320px; padding: 0 10px;">
             <div style="color: #334155;">Dibuat Oleh,</div>
-            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola ATK Perkara</div>
+            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola Persediaan ATK</div>
             <div style="height: 65px;"></div>
             <div style="font-weight: 800; text-decoration: underline;">${kasirNama}</div>
             <div style="font-size: 10px; font-family: monospace; color: #475569;">${kasirNip}</div>
@@ -371,6 +383,322 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
         </div>
       `;
     }
+
+    // -------------------------------------------------------------
+    // TEMPLATE REKAPITULASI PEMAKAIAN & PERSEDIAAN BARANG ATK
+    // -------------------------------------------------------------
+    if (reportType === 'rekap-persediaan') {
+      const invRowsHtml = inventorySummary.items.length === 0
+        ? `<tr><td colspan="9" style="padding: 24px; text-align: center; color: #64748b; font-style: italic;">Tidak ada data pemakaian barang persediaan ATK pada periode yang dipilih.</td></tr>`
+        : inventorySummary.items.map((it, idx) => {
+            const perkaraList = it.daftarPerkara.map(p => p.nomorPerkara).filter((v, i, a) => a.indexOf(v) === i);
+            const perkaraDisplay = perkaraList.length <= 3 
+              ? perkaraList.join(', ') 
+              : `${perkaraList.slice(0, 3).join(', ')} (+${perkaraList.length - 3} perkara lainnya)`;
+
+            return `
+              <tr style="border-bottom: 1px solid ${borderCol}; page-break-inside: avoid;">
+                <td style="padding: 6px 8px; text-align: center; font-weight: 700; border-right: 1px solid ${borderCol};">${idx + 1}</td>
+                <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-weight: 700; border-right: 1px solid ${borderCol}; color: #475569;">${it.kodeBarang}</td>
+                <td style="padding: 6px 8px; border-right: 1px solid ${borderCol};">
+                  <div style="font-weight: 700; color: #0f172a;">${it.namaBarang}</div>
+                  <div style="font-size: 9px; color: #64748b; margin-top: 2px;">${it.keterangan}</div>
+                </td>
+                <td style="padding: 6px 8px; text-align: center; font-weight: 600; border-right: 1px solid ${borderCol};">${it.kategori}</td>
+                <td style="padding: 6px 8px; text-align: center; font-weight: 700; border-right: 1px solid ${borderCol}; background: ${isColor ? '#f8fafc' : '#ffffff'};">${it.satuan}</td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; border-right: 1px solid ${borderCol};">${formatRp(it.hargaSatuan)}</td>
+                <td style="padding: 6px 8px; text-align: center; font-family: monospace; font-weight: 800; border-right: 1px solid ${borderCol}; color: ${isColor ? '#6d28d9' : '#0f172a'};">
+                  ${it.totalKuantitas} ${it.satuan}
+                </td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 800; color: ${cKredit}; border-right: 1px solid ${borderCol};">
+                  ${formatRp(it.totalNominal)}
+                </td>
+                <td style="padding: 6px 8px; font-size: 9px; color: #334155;">
+                  ${perkaraDisplay} (${it.frekuensiDipakai}x pemakaian)
+                </td>
+              </tr>
+            `;
+          }).join('');
+
+      return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Rekapitulasi Pemakaian & Persediaan Barang ATK Perkara - ${namaPengadilan}</title>
+  <style>
+    @page {
+      size: ${paperSizeCss} ${paperOrientation};
+      margin: 12mm 15mm 12mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #0f172a;
+      background: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+    .kop-container {
+      text-align: center;
+      border-bottom: 3px double #000000;
+      padding-bottom: 8px;
+      margin-bottom: 14px;
+    }
+    .kop-logo {
+      font-size: 26px;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .kop-h1 {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin: 1px 0;
+    }
+    .kop-pengadilan {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin: 2px 0;
+    }
+    .kop-alamat {
+      font-size: 10px;
+      color: #334155;
+      margin: 2px 0 0 0;
+    }
+    .title-box {
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    .title-h2 {
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      text-decoration: underline;
+      margin: 0 0 4px 0;
+    }
+    .title-periode {
+      font-size: 11px;
+      font-weight: 800;
+      font-family: monospace;
+      color: ${isColor ? '#6d28d9' : '#000000'};
+      margin: 0;
+    }
+    .summary-grid {
+      display: flex;
+      border: 1px solid ${borderCol};
+      border-radius: 6px;
+      background: ${bgHeader};
+      padding: 10px;
+      margin-bottom: 14px;
+      page-break-inside: avoid;
+    }
+    .summary-item {
+      flex: 1;
+      padding: 0 10px;
+      border-right: 1px solid ${borderCol};
+    }
+    .summary-item:last-child {
+      border-right: none;
+    }
+    .summary-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #475569;
+    }
+    .summary-value {
+      font-size: 13px;
+      font-weight: 900;
+      font-family: monospace;
+      margin-top: 3px;
+    }
+    table.atk-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid ${borderCol};
+      font-size: 10px;
+      margin-bottom: 16px;
+    }
+    table.atk-table thead {
+      display: table-header-group;
+    }
+    table.atk-table tr {
+      page-break-inside: avoid;
+    }
+    table.atk-table th {
+      background: ${bgTableHead};
+      border: 1px solid ${borderCol};
+      padding: 6px 8px;
+      font-size: 10px;
+      font-weight: 800;
+      text-align: center;
+    }
+    table.atk-table td {
+      border: 1px solid ${borderCol};
+    }
+    table.atk-table tfoot td {
+      background: ${bgTableHead};
+      font-weight: 800;
+      border: 1px solid ${borderCol};
+      padding: 8px;
+    }
+    .footer-doc {
+      margin-top: 24px;
+      padding-top: 6px;
+      border-top: 1px solid ${borderCol};
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.5px;
+      color: #64748b;
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <!-- KOP SURAT MAHKAMAH AGUNG -->
+  <div class="kop-container">
+    <div class="kop-logo">⚖️</div>
+    <div class="kop-h1">MAHKAMAH AGUNG REPUBLIK INDONESIA</div>
+    <div class="kop-h1">DIREKTORAT JENDERAL BADAN PERADILAN AGAMA</div>
+    <div class="kop-h1">${instansiTinggi}</div>
+    <div class="kop-pengadilan">${namaPengadilan}</div>
+    <div class="kop-alamat">${alamatPengadilan}</div>
+  </div>
+
+  <!-- JUDUL LAPORAN PERSEDIAAN -->
+  <div class="title-box">
+    <h2 class="title-h2">REKAPITULASI PEMAKAIAN & PERSEDIAAN BARANG ATK PERKARA</h2>
+    <p class="title-periode">PERIODE : ${periodeTeks} ${filterPerkaraLabel}</p>
+    <p style="font-size: 9.5px; color: #64748b; margin: 3px 0 0 0;">
+      Kalkulasi Akumulasi Volume & Nilai Pengeluaran Barang Persediaan Habis Pakai Perkara Peradilan
+    </p>
+  </div>
+
+  <!-- RINGKASAN PERSDIAAN -->
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div class="summary-label">Total Jenis Barang Digunakan</div>
+      <div class="summary-value" style="color: ${isColor ? '#6d28d9' : '#000000'};">${inventorySummary.totalJenisBarang} Macam Barang</div>
+      <div style="font-size: 8.5px; color: #64748b; margin-top: 2px;">Barang habis pakai kepaniteraan</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Kuantitas Fisik Barang</div>
+      <div class="summary-value" style="color: ${isColor ? '#0369a1' : '#000000'};">${inventorySummary.totalKuantitasSemua} Unit/Satuan</div>
+      <div style="font-size: 8.5px; color: #64748b; margin-top: 2px;">Akumulasi volume rim, lembar, buah</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Total Nilai Pemakaian Persediaan</div>
+      <div class="summary-value" style="color: ${cKredit};">${formatRp(inventorySummary.totalNominal)}</div>
+      <div style="font-size: 8.5px; color: #64748b; margin-top: 2px;">Total rupiah barang dikeluarkan</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Cakupan Perkara</div>
+      <div class="summary-value" style="color: ${cDebet}; font-size: 11px;">
+        ${filterNomorPerkara !== 'all' ? filterNomorPerkara : 'Semua Perkara Teregister'}
+      </div>
+      <div style="font-size: 8.5px; color: #64748b; margin-top: 2px;">Tersimpan di Tab SimulasiAtkPerkara</div>
+    </div>
+  </div>
+
+  <!-- TABEL REKAPITULASI PERSEDIAAN BARANG -->
+  <table class="atk-table">
+    <thead>
+      <tr>
+        <th style="width: 32px;">NO</th>
+        <th style="width: 85px;">KODE</th>
+        <th>NAMA BARANG PERSEDIAAN ATK</th>
+        <th style="width: 80px;">KATEGORI</th>
+        <th style="width: 65px;">SATUAN</th>
+        <th style="width: 85px; text-align: right;">HARGA (RP)</th>
+        <th style="width: 95px;">VOLUME DIGUNAKAN</th>
+        <th style="width: 105px; text-align: right;">TOTAL NILAI (RP)</th>
+        <th style="width: 130px;">PERUNTUKAN PERKARA</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${invRowsHtml}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6" style="text-align: center; font-weight: 900; letter-spacing: 0.5px;">
+          JUMLAH TOTAL NILAI PEMAKAIAN PERSEDIAAN BARANG
+        </td>
+        <td style="text-align: center; font-family: monospace; font-weight: 900; color: ${isColor ? '#6d28d9' : '#000000'};">
+          ${inventorySummary.totalKuantitasSemua}
+        </td>
+        <td style="text-align: right; font-family: monospace; font-weight: 900; color: ${cKredit};">
+          ${formatRp(inventorySummary.totalNominal)}
+        </td>
+        <td style="text-align: center; font-size: 9px; color: #475569;">
+          SEIMBANG (AUDITED)
+        </td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- LEMBAR PENGESAHAN TANDA TANGAN RESMI -->
+  <div style="page-break-inside: avoid; margin-top: 24px;">
+    <div style="text-align: right; font-weight: 600; margin-bottom: 8px; padding-right: 15px;">
+      ${kotaTanggal}
+    </div>
+    ${signaturesHtml}
+  </div>
+
+  <!-- CATATAN KAKI DOKUMEN -->
+  <div class="footer-doc">
+    <span>Dokumen ini dicetak otomatis melalui Aplikasi SI-PERKARA PA Paniai • Modul Rekapitulasi Persediaan Barang ATK</span>
+    <span>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</span>
+  </div>
+</body>
+</html>`;
+    }
+
+    // -------------------------------------------------------------
+    // TEMPLATE BUKU PEMBANTU KAS ATK PERKARA (DEFAULT)
+    // -------------------------------------------------------------
+    const tableRowsHtml = ledgerWithBalance.length === 0 
+      ? `<tr><td colspan="7" style="padding: 24px; text-align: center; color: #64748b; font-style: italic;">Tidak ada data transaksi ATK pada periode yang dipilih (${periodeTeks}).</td></tr>`
+      : ledgerWithBalance.map(r => `
+          <tr style="border-bottom: 1px solid ${borderCol}; page-break-inside: avoid;">
+            <td style="padding: 6px 8px; text-align: center; font-weight: 700; border-right: 1px solid ${borderCol};">${r.no}</td>
+            <td style="padding: 6px 8px; text-align: center; font-family: monospace; white-space: nowrap; border-right: 1px solid ${borderCol};">${r.tanggal}</td>
+            <td style="padding: 6px 8px; font-family: monospace; font-weight: 700; white-space: nowrap; border-right: 1px solid ${borderCol};">${r.nomorPerkara}</td>
+            <td style="padding: 6px 8px; border-right: 1px solid ${borderCol};">
+              <div style="font-weight: 600;">${r.uraian}</div>
+              <div style="font-size: 9px; color: #64748b; margin-top: 2px;">Pihak: ${r.namaPihak} • Kat: ${r.kategori}</div>
+            </td>
+            <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 700; color: ${cDebet}; border-right: 1px solid ${borderCol};">
+              ${r.penerimaan > 0 ? formatRp(r.penerimaan) : '-'}
+            </td>
+            <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 700; color: ${cKredit}; border-right: 1px solid ${borderCol};">
+              ${r.pengeluaran > 0 ? formatRp(r.pengeluaran) : '-'}
+            </td>
+            <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 800; color: ${cSaldo};">
+              ${formatRp(r.saldo)}
+            </td>
+          </tr>
+        `).join('');
+
+    const categoryColsHtml = (Object.entries(categoryBreakdown) as [string, { total: number; count: number }][]).map(([cat, d]) => `
+      <div style="flex: 1; min-width: 90px; text-align: center; padding: 6px 4px; border-right: 1px solid ${borderCol};">
+        <div style="font-size: 9.5px; font-weight: 700; color: #475569; text-transform: uppercase;">${cat}</div>
+        <div style="font-family: monospace; font-weight: 800; font-size: 11px; margin-top: 2px; color: ${isColor ? '#1e293b' : '#000000'};">${formatRp(d.total)}</div>
+        <div style="font-size: 8.5px; color: #64748b;">${d.count} item</div>
+      </div>
+    `).join('');
 
     return `<!DOCTYPE html>
 <html lang="id">
@@ -553,7 +881,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   <!-- JUDUL DOKUMEN -->
   <div class="title-box">
     <h2 class="title-h2">BUKU PEMBANTU BIAYA PROSES / ATK PERKARA</h2>
-    <p class="title-periode">PERIODE : ${periodeTeks}</p>
+    <p class="title-periode">PERIODE : ${periodeTeks} ${filterPerkaraLabel}</p>
   </div>
 
   <!-- RINGKASAN FINANSIAL RESMI -->
@@ -599,10 +927,9 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
         <th style="width: 75px;">TANGGAL</th>
         <th style="width: 140px;">NOMOR PERKARA</th>
         <th>URAIAN PENGELUARAN / JENIS ATK</th>
-        <th style="width: 105px; text-align: right;">PENERIMAAN (DEBET)</th>
-        <th style="width: 105px; text-align: right;">PENGELUARAN (KREDIT)</th>
-        <th style="width: 105px; text-align: right;">SALDO</th>
-        <th style="width: 110px;">SUMBER DATA</th>
+        <th style="width: 110px; text-align: right;">PENERIMAAN (DEBET)</th>
+        <th style="width: 110px; text-align: right;">PENGELUARAN (KREDIT)</th>
+        <th style="width: 110px; text-align: right;">SALDO</th>
       </tr>
     </thead>
     <tbody>
@@ -621,9 +948,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
         </td>
         <td style="text-align: right; font-family: monospace; font-weight: 900; color: ${cSaldo};">
           ${formatRp(saldoAkhir)}
-        </td>
-        <td style="text-align: center; font-size: 9px; color: #475569;">
-          BALANCE
         </td>
       </tr>
     </tfoot>
@@ -647,14 +971,13 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   };
 
   // =========================================================================
-  // PRINT HANDLER DEDIKASI (TIDAK MEMOTONG, WARNA PENUH, BUKAN SCREENSHOT!)
+  // PRINT HANDLER DEDIKASI
   // =========================================================================
   const handlePrintDedicated = (isColor: boolean = printColorMode === 'color') => {
     try {
       setIsPrinting(true);
       const fullHtml = generateCleanPrintHtml(isColor);
 
-      // Buat iframe tersembunyi khusus cetak
       const printIframe = document.createElement('iframe');
       printIframe.style.position = 'fixed';
       printIframe.style.right = '0';
@@ -684,7 +1007,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
           window.print();
         } finally {
           setIsPrinting(false);
-          // Hapus iframe setelah dialog cetak selesai
           setTimeout(() => {
             if (document.body.contains(printIframe)) {
               document.body.removeChild(printIframe);
@@ -716,31 +1038,47 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     const periodStr = selectedMonth !== 'all' 
       ? `${MONTH_LABELS[selectedMonth] || selectedMonth}_${selectedYear}` 
       : `TAHUN_${selectedYear}`;
-    const filename = `Laporan_Resmi_ATK_${namaPengadilan.replace(/\s+/g, '_')}_${periodStr}.csv`;
 
-    const headers = ['No', 'Tanggal', 'Nomor Perkara', 'Nama Pihak', 'Uraian ATK / Transaksi', 'Kategori', 'Penerimaan (Debet)', 'Pengeluaran (Kredit)', 'Saldo Berjalan', 'Sumber Data'];
-    const rows = ledgerWithBalance.map(r => [
-      r.no,
-      `"${r.tanggal}"`,
-      `"${r.nomorPerkara}"`,
-      `"${r.namaPihak}"`,
-      `"${r.uraian.replace(/"/g, '""')}"`,
-      `"${r.kategori}"`,
-      r.penerimaan,
-      r.pengeluaran,
-      r.saldo,
-      r.isAiGenerated ? '"Simulasi AI (Spreadsheet)"' : '"Pendaftaran / Realisasi"'
-    ]);
+    if (reportType === 'rekap-persediaan') {
+      const csvData = exportAtkInventoryToCsv(
+        inventorySummary,
+        namaPengadilan,
+        `${periodeTeks} ${filterPerkaraLabel}`
+      );
+      const filename = `Rekap_Persediaan_ATK_${namaPengadilan.replace(/\s+/g, '_')}_${periodStr}.csv`;
+      const blob = new Blob(['\uFEFF' + csvData], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const filename = `Laporan_Resmi_ATK_${namaPengadilan.replace(/\s+/g, '_')}_${periodStr}.csv`;
+      const headers = ['No', 'Tanggal', 'Nomor Perkara', 'Nama Pihak', 'Uraian ATK / Transaksi', 'Kategori', 'Penerimaan (Debet)', 'Pengeluaran (Kredit)', 'Saldo Berjalan'];
+      const rows = ledgerWithBalance.map(r => [
+        r.no,
+        `"${r.tanggal}"`,
+        `"${r.nomorPerkara}"`,
+        `"${r.namaPihak}"`,
+        `"${r.uraian.replace(/"/g, '""')}"`,
+        `"${r.kategori}"`,
+        r.penerimaan,
+        r.pengeluaran,
+        r.saldo
+      ]);
 
-    const csvContent = [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const csvContent = [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   if (!isOpen) return null;
@@ -780,11 +1118,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
               }`}>
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center text-white shadow-md shadow-purple-600/30">
-                    <Printer className="w-5 h-5" />
+                    {reportType === 'rekap-persediaan' ? <Boxes className="w-5 h-5" /> : <Printer className="w-5 h-5" />}
                   </div>
                   <div>
                     <DialogTitle as="h3" className="font-extrabold text-base flex items-center space-x-2">
-                      <span>Cetak Laporan Resmi Buku Pembantu ATK Perkara</span>
+                      <span>{reportType === 'rekap-persediaan' ? 'Rekapitulasi Pemakaian & Persediaan Barang ATK' : 'Cetak Buku Pembantu Kas ATK Perkara'}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-600 text-white font-bold tracking-wide">
                         RESMI MA-RI
                       </span>
@@ -797,6 +1135,32 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
                 {/* Right Action Buttons */}
                 <div className="flex items-center space-x-2">
+                  {/* Selector Jenis Laporan: Buku Kas vs Rekap Persediaan */}
+                  <div className="flex items-center bg-purple-100 dark:bg-purple-950 p-1 rounded-xl border border-purple-300 dark:border-purple-800">
+                    <button
+                      onClick={() => setReportType('buku-kas')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                        reportType === 'buku-kas'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
+                      }`}
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Buku Kas ATK</span>
+                    </button>
+                    <button
+                      onClick={() => setReportType('rekap-persediaan')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                        reportType === 'rekap-persediaan'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
+                      }`}
+                    >
+                      <Boxes className="w-3.5 h-3.5" />
+                      <span>Rekap Persediaan</span>
+                    </button>
+                  </div>
+
                   <button
                     onClick={() => setShowConfig(prev => !prev)}
                     className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
@@ -806,7 +1170,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     }`}
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5" />
-                    <span>Opsi Kop, TTD & Kertas</span>
+                    <span>Opsi Kop & TTD</span>
                   </button>
 
                   <button
@@ -814,7 +1178,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
                       isLight ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50' : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
                     }`}
-                    title="Unduh data laporan ke dalam format file Excel / CSV"
+                    title={reportType === 'rekap-persediaan' ? 'Unduh Rekap Persediaan ATK ke Excel / CSV' : 'Unduh Buku Kas ATK ke Excel / CSV'}
                   >
                     <Download className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Ekspor CSV</span>
@@ -856,7 +1220,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
               }`}>
                 {/* Left: Mode Warna & Kertas */}
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Selector Mode Warna: Berwarna Sistem vs B&W */}
                   <div className="flex items-center space-x-1 bg-purple-100/80 dark:bg-purple-950/60 p-1 rounded-xl border border-purple-200 dark:border-purple-800">
                     <button
                       onClick={() => setPrintColorMode('color')}
@@ -865,7 +1228,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                           ? 'bg-purple-600 text-white shadow-xs' 
                           : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
                       }`}
-                      title="Hasil cetak mempertahankan warna asli sistem (Hijau Debet, Merah Kredit, Ungu Saldo, Badge)"
+                      title="Hasil cetak mempertahankan warna asli sistem"
                     >
                       <Palette className="w-3.5 h-3.5" />
                       <span>🎨 Berwarna Sesuai Sistem</span>
@@ -878,7 +1241,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                           ? 'bg-slate-800 text-white shadow-xs' 
                           : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/50'
                       }`}
-                      title="Hasil cetak monokrom formal (hitam putih & abu-abu)"
+                      title="Hasil cetak monokrom formal"
                     >
                       <FileText className="w-3.5 h-3.5" />
                       <span>🖨️ Hitam Putih (B&W)</span>
@@ -926,6 +1289,24 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
                 {/* Right: Filter Periode & Perkara */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Filter Nomor Perkara Spesifik */}
+                  <div className="flex items-center space-x-1">
+                    <Filter className="w-3.5 h-3.5 text-purple-600" />
+                    <select
+                      value={filterNomorPerkara}
+                      onChange={(e) => setFilterNomorPerkara(e.target.value)}
+                      className={`px-2 py-1 rounded-xl font-bold border max-w-[180px] ${
+                        isLight ? 'bg-white border-slate-300 text-slate-800' : 'bg-slate-800 border-slate-700 text-slate-200'
+                      }`}
+                      title="Saring laporan untuk seluruh perkara atau satu nomor perkara spesifik"
+                    >
+                      <option value="all">📁 Semua Perkara</option>
+                      {distinctCaseNumbers.map(nom => (
+                        <option key={nom} value={nom}>{nom}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="flex items-center space-x-1 font-bold text-slate-700 dark:text-slate-300">
                     <Calendar className="w-3.5 h-3.5 text-purple-600" />
                     <span>Periode:</span>
@@ -967,30 +1348,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     <option value="2025">2025</option>
                     <option value="2024">2024</option>
                   </select>
-
-                  {/* Filter Status Perkara */}
-                  <div className="flex items-center space-x-1">
-                    <button
-                      onClick={() => setFilterPerkaraStatus('all')}
-                      className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                        filterPerkaraStatus === 'all' 
-                          ? 'bg-purple-600 text-white' 
-                          : isLight ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      Semua
-                    </button>
-                    <button
-                      onClick={() => setFilterPerkaraStatus('putus')}
-                      className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
-                        filterPerkaraStatus === 'putus' 
-                          ? 'bg-purple-600 text-white' 
-                          : isLight ? 'bg-slate-200 text-slate-700' : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      Putus (Rp0)
-                    </button>
-                  </div>
                 </div>
               </div>
 
@@ -1005,7 +1362,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                       <span>Kustomisasi Identitas Kop Surat & Pejabat Penandatangan</span>
                     </span>
                     
-                    {/* TTD Layout selector */}
                     <div className="flex items-center space-x-2">
                       <span className="text-slate-500 font-normal">Format TTD:</span>
                       <select
@@ -1095,7 +1451,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     </div>
 
                     <div className="p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1">
-                      <span className="font-bold text-slate-700 dark:text-slate-300 block">Dibuat Oleh: Kasir / Pengelola ATK</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300 block">Dibuat Oleh: Kasir / Persediaan</span>
                       <input
                         type="text"
                         placeholder="Nama Kasir"
@@ -1126,7 +1482,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                 }`}
               >
                 
-                {/* KOP SURAT RESMI PENGADILAN AGAMA (KOP GARIS GANDA) */}
+                {/* KOP SURAT RESMI PENGADILAN AGAMA */}
                 <div className="text-center space-y-0.5 border-b-[3px] border-double border-slate-900 pb-3">
                   <div className="flex items-center justify-center space-x-3 mb-1">
                     <div className="w-10 h-10 rounded-full border-2 border-slate-900 flex items-center justify-center font-serif font-black text-lg">
@@ -1150,208 +1506,334 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                   </p>
                 </div>
 
-                {/* JUDUL LAPORAN RESMI */}
-                <div className="text-center space-y-1 pt-1">
-                  <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
-                    BUKU PEMBANTU BIAYA PROSES / ATK PERKARA
-                  </h3>
-                  <p className={`text-xs font-bold uppercase font-mono ${
-                    printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
-                  }`}>
-                    PERIODE : {periodeTeks}
-                  </p>
-                  <p className="text-[10px] text-slate-500">
-                    Berdasarkan Ketentuan Pengelolaan Panjar Biaya Perkara & Penyelesaian Saldo Perkara Putus Rp 0
-                  </p>
-                </div>
+                {/* -------------------------------------------------------------
+                    KONTEN LAPORAN PERSDIAAN ATAU BUKU KAS
+                    ------------------------------------------------------------- */}
+                {reportType === 'rekap-persediaan' ? (
+                  <>
+                    {/* JUDUL LAPORAN REKAP PERSEDIAAN */}
+                    <div className="text-center space-y-1 pt-1">
+                      <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
+                        REKAPITULASI PEMAKAIAN & PERSEDIAAN BARANG ATK PERKARA
+                      </h3>
+                      <p className={`text-xs font-bold uppercase font-mono ${
+                        printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
+                      }`}>
+                        PERIODE : {periodeTeks} {filterPerkaraLabel}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Kalkulasi Akumulasi Volume & Nilai Pengeluaran Barang Persediaan Habis Pakai Perkara Peradilan
+                      </p>
+                    </div>
 
-                {/* RINGKASAN REKAPITULASI KEUANGAN RESMI (A, B, C, D) DENGAN WARNA SISTEM */}
-                <div className={`grid grid-cols-1 md:grid-cols-4 gap-3 border p-3 rounded-lg text-xs ${
-                  printColorMode === 'color' 
-                    ? 'border-purple-200 bg-purple-50/40' 
-                    : 'border-slate-300 bg-slate-50'
-                }`}>
-                  <div className="border-r-0 md:border-r border-slate-300 pr-2">
-                    <span className="text-[10px] font-bold uppercase text-slate-500 block">
-                      A. Total Penerimaan ATK
-                    </span>
-                    <strong className={`text-sm font-black font-mono block mt-0.5 ${
-                      printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                    {/* RINGKASAN PERSDIAAN */}
+                    <div className={`grid grid-cols-1 md:grid-cols-4 gap-3 border p-3 rounded-lg text-xs ${
+                      printColorMode === 'color' ? 'border-purple-200 bg-purple-50/40' : 'border-slate-300 bg-slate-50'
                     }`}>
-                      {formatRp(totalPenerimaan)}
-                    </strong>
-                    <span className="text-[9px] text-slate-500">
-                      Panjar pendaftaran perkara
-                    </span>
-                  </div>
-
-                  <div className="border-r-0 md:border-r border-slate-300 pr-2">
-                    <span className="text-[10px] font-bold uppercase text-slate-500 block">
-                      B. Total Pengeluaran ATK
-                    </span>
-                    <strong className={`text-sm font-black font-mono block mt-0.5 ${
-                      printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
-                    }`}>
-                      {formatRp(totalPengeluaran)}
-                    </strong>
-                    <span className="text-[9px] text-slate-500">
-                      Realisasi & simulasi ATK
-                    </span>
-                  </div>
-
-                  <div className="border-r-0 md:border-r border-slate-300 pr-2">
-                    <span className="text-[10px] font-bold uppercase text-slate-500 block">
-                      C. Sisa Saldo ATK Periode
-                    </span>
-                    <strong className={`text-sm font-black font-mono block mt-0.5 ${
-                      printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
-                    }`}>
-                      {formatRp(saldoAkhir)}
-                    </strong>
-                    <span className="text-[9px] text-slate-500">
-                      Sisa kas ATK kantor berjalan
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-[10px] font-bold uppercase text-slate-500 block">
-                      D. Status Saldo Putus Rp 0
-                    </span>
-                    <strong className={`text-xs font-black font-mono block mt-0.5 ${
-                      printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
-                    }`}>
-                      Tuntas Sesuai Aturan
-                    </strong>
-                    <span className="text-[9px] text-slate-500">
-                      Tersimpan di Sheet
-                    </span>
-                  </div>
-                </div>
-
-                {/* REKAP RINCIAN PENGELUARAN PER KATEGORI ATK */}
-                <div className="border border-slate-300 rounded-lg overflow-hidden">
-                  <div className="bg-slate-100 px-3 py-1.5 font-bold text-[11px] border-b border-slate-300 flex justify-between items-center text-slate-800">
-                    <span>REKAPITULASI PENGELUARAN PER KELOMPOK ATK (STANDAR MAHKAMAH AGUNG RI)</span>
-                    <span className="text-[10px] font-mono">Total Item: {countSimulasi}</span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-y sm:divide-y-0 divide-slate-200 text-[11px] p-2 bg-white">
-                    {(Object.entries(categoryBreakdown) as [string, { total: number; count: number }][]).map(([cat, data]) => (
-                      <div key={cat} className="p-2 text-center">
-                        <span className="text-[10px] font-bold text-slate-500 block">{cat}</span>
-                        <strong className="font-mono font-bold text-slate-800 block">
-                          {formatRp(data.total)}
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">Total Jenis Barang</span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
+                        }`}>
+                          {inventorySummary.totalJenisBarang} Macam Barang
                         </strong>
-                        <span className="text-[9px] text-slate-400">{data.count} transaksi</span>
+                        <span className="text-[9px] text-slate-500">Barang habis pakai kepaniteraan</span>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">Total Kuantitas Fisik</span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-sky-700' : 'text-slate-900'
+                        }`}>
+                          {inventorySummary.totalKuantitasSemua} Unit/Satuan
+                        </strong>
+                        <span className="text-[9px] text-slate-500">Akumulasi volume barang terpakai</span>
+                      </div>
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">Total Nilai Pemakaian</span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
+                        }`}>
+                          {formatRp(inventorySummary.totalNominal)}
+                        </strong>
+                        <span className="text-[9px] text-slate-500">Total rupiah barang dikeluarkan</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">Cakupan Perkara</span>
+                        <strong className={`text-xs font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                        }`}>
+                          {filterNomorPerkara !== 'all' ? filterNomorPerkara : 'Semua Perkara'}
+                        </strong>
+                        <span className="text-[9px] text-slate-500">Tersinkron di Spreadsheet</span>
+                      </div>
+                    </div>
 
-                {/* TABEL BUKU BESAR PEMBANTU KAS ATK PERKARA */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse border border-slate-300 text-[11px]">
-                    <thead>
-                      <tr className="bg-slate-100 font-bold border-b border-slate-300 text-center text-slate-800">
-                        <th className="p-1.5 border-r border-slate-300 w-10">NO</th>
-                        <th className="p-1.5 border-r border-slate-300 w-24">TANGGAL</th>
-                        <th className="p-1.5 border-r border-slate-300 w-36">NOMOR PERKARA</th>
-                        <th className="p-1.5 border-r border-slate-300">URAIAN PENGELUARAN / JENIS ATK</th>
-                        <th className="p-1.5 border-r border-slate-300 text-right w-28">PENERIMAAN (DEBET)</th>
-                        <th className="p-1.5 border-r border-slate-300 text-right w-28">PENGELUARAN (KREDIT)</th>
-                        <th className="p-1.5 border-r border-slate-300 text-right w-28">SALDO</th>
-                        <th className="p-1.5 text-center w-28">SUMBER DATA</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {ledgerWithBalance.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} className="p-6 text-center text-slate-400 italic">
-                            Tidak ada data transaksi ATK pada periode yang dipilih ({periodeTeks}).
-                          </td>
-                        </tr>
-                      ) : (
-                        ledgerWithBalance.map((row) => (
-                          <tr key={row.id} className="hover:bg-slate-50">
-                            <td className="p-1.5 border-r border-slate-200 text-center font-bold text-slate-700">
-                              {row.no}
+                    {/* TABEL REKAP PERSDIAAN */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse border border-slate-300 text-[11px]">
+                        <thead>
+                          <tr className="bg-slate-100 font-bold border-b border-slate-300 text-center text-slate-800">
+                            <th className="p-1.5 border-r border-slate-300 w-10">NO</th>
+                            <th className="p-1.5 border-r border-slate-300 w-24">KODE</th>
+                            <th className="p-1.5 border-r border-slate-300">NAMA BARANG PERSEDIAAN ATK</th>
+                            <th className="p-1.5 border-r border-slate-300 w-20">KATEGORI</th>
+                            <th className="p-1.5 border-r border-slate-300 w-16 text-center">SATUAN</th>
+                            <th className="p-1.5 border-r border-slate-300 text-right w-24">HARGA (RP)</th>
+                            <th className="p-1.5 border-r border-slate-300 text-center w-28">VOLUME DIGUNAKAN</th>
+                            <th className="p-1.5 border-r border-slate-300 text-right w-28">TOTAL NILAI (RP)</th>
+                            <th className="p-1.5 text-center w-36">PERUNTUKAN PERKARA</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {inventorySummary.items.length === 0 ? (
+                            <tr>
+                              <td colSpan={9} className="p-6 text-center text-slate-400 italic">
+                                Tidak ada data pemakaian barang persediaan ATK pada periode yang dipilih.
+                              </td>
+                            </tr>
+                          ) : (
+                            inventorySummary.items.map((it, idx) => {
+                              const perkaraList = it.daftarPerkara.map(p => p.nomorPerkara).filter((v, i, a) => a.indexOf(v) === i);
+                              const perkaraDisplay = perkaraList.length <= 2 
+                                ? perkaraList.join(', ') 
+                                : `${perkaraList.slice(0, 2).join(', ')} (+${perkaraList.length - 2} perkara)`;
+
+                              return (
+                                <tr key={it.id} className="hover:bg-slate-50">
+                                  <td className="p-1.5 border-r border-slate-200 text-center font-bold text-slate-700">{idx + 1}</td>
+                                  <td className="p-1.5 border-r border-slate-200 font-mono text-center font-bold text-slate-600">{it.kodeBarang}</td>
+                                  <td className="p-1.5 border-r border-slate-200">
+                                    <span className="font-bold block text-slate-900">{it.namaBarang}</span>
+                                    <span className="text-[10px] text-slate-500 block">{it.keterangan}</span>
+                                  </td>
+                                  <td className="p-1.5 border-r border-slate-200 text-center font-semibold text-slate-700">{it.kategori}</td>
+                                  <td className="p-1.5 border-r border-slate-200 text-center font-bold text-slate-800 bg-slate-50/50">{it.satuan}</td>
+                                  <td className="p-1.5 border-r border-slate-200 text-right font-mono text-slate-700">{formatRp(it.hargaSatuan)}</td>
+                                  <td className={`p-1.5 border-r border-slate-200 text-center font-mono font-black ${
+                                    printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
+                                  }`}>
+                                    {it.totalKuantitas} {it.satuan}
+                                  </td>
+                                  <td className={`p-1.5 border-r border-slate-200 text-right font-mono font-bold ${
+                                    printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
+                                  }`}>
+                                    {formatRp(it.totalNominal)}
+                                  </td>
+                                  <td className="p-1.5 text-center text-[10px] text-slate-600">
+                                    <span className="font-semibold block">{perkaraDisplay}</span>
+                                    <span className="text-[9px] text-slate-400">({it.frekuensiDipakai}x pemakaian)</span>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-xs text-slate-900">
+                            <td colSpan={6} className="p-2 border-r border-slate-300 text-center font-black uppercase tracking-wider">
+                              JUMLAH TOTAL NILAI PEMAKAIAN PERSEDIAAN
                             </td>
-                            <td className="p-1.5 border-r border-slate-200 font-mono whitespace-nowrap text-center text-slate-700">
-                              {row.tanggal}
-                            </td>
-                            <td className="p-1.5 border-r border-slate-200 font-mono font-bold whitespace-nowrap text-slate-900">
-                              {row.nomorPerkara}
-                            </td>
-                            <td className="p-1.5 border-r border-slate-200">
-                              <span className="font-semibold block text-slate-900">{row.uraian}</span>
-                              <span className="text-[10px] text-slate-500 block">
-                                Pihak: {row.namaPihak} • Kat: {row.kategori}
-                              </span>
-                            </td>
-                            <td className={`p-1.5 border-r border-slate-200 text-right font-mono font-bold ${
-                              printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                            <td className={`p-2 border-r border-slate-300 text-center font-mono font-black ${
+                              printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
                             }`}>
-                              {row.penerimaan > 0 ? formatRp(row.penerimaan) : '-'}
+                              {inventorySummary.totalKuantitasSemua}
                             </td>
-                            <td className={`p-1.5 border-r border-slate-200 text-right font-mono font-bold ${
+                            <td className={`p-2 border-r border-slate-300 text-right font-mono font-black ${
                               printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
                             }`}>
-                              {row.pengeluaran > 0 ? formatRp(row.pengeluaran) : '-'}
+                              {formatRp(inventorySummary.totalNominal)}
                             </td>
-                            <td className={`p-1.5 border-r border-slate-200 text-right font-mono font-black ${
-                              printColorMode === 'color' ? 'text-purple-800' : 'text-slate-900'
-                            }`}>
-                              {formatRp(row.saldo)}
-                            </td>
-                            <td className="p-1.5 text-center whitespace-nowrap">
-                              {row.isAiGenerated ? (
-                                <span className={`inline-flex items-center text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                                  printColorMode === 'color' 
-                                    ? 'bg-purple-100 text-purple-800 border border-purple-200' 
-                                    : 'bg-slate-100 text-slate-800 border border-slate-300'
-                                }`}>
-                                  ✓ Sinkron Spreadsheet
-                                </span>
-                              ) : (
-                                <span className={`inline-flex items-center text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                                  printColorMode === 'color' 
-                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                                    : 'bg-slate-100 text-slate-800 border border-slate-300'
-                                }`}>
-                                  ✓ Penerimaan Panjar
-                                </span>
-                              )}
+                            <td className="p-2 text-center text-[10px] font-bold text-slate-500">
+                              BALANCE
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-xs text-slate-900">
-                        <td colSpan={4} className="p-2 border-r border-slate-300 text-center font-black uppercase tracking-wider">
-                          JUMLAH TOTAL PERIODE INI
-                        </td>
-                        <td className={`p-2 border-r border-slate-300 text-right font-mono font-black ${
+                        </tfoot>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* JUDUL LAPORAN RESMI BUKU KAS */}
+                    <div className="text-center space-y-1 pt-1">
+                      <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
+                        BUKU PEMBANTU BIAYA PROSES / ATK PERKARA
+                      </h3>
+                      <p className={`text-xs font-bold uppercase font-mono ${
+                        printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
+                      }`}>
+                        PERIODE : {periodeTeks} {filterPerkaraLabel}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Berdasarkan Ketentuan Pengelolaan Panjar Biaya Perkara & Penyelesaian Saldo Perkara Putus Rp 0
+                      </p>
+                    </div>
+
+                    {/* RINGKASAN FINANSIAL RESMI (A, B, C, D) DENGAN WARNA SISTEM */}
+                    <div className={`grid grid-cols-1 md:grid-cols-4 gap-3 border p-3 rounded-lg text-xs ${
+                      printColorMode === 'color' 
+                        ? 'border-purple-200 bg-purple-50/40' 
+                        : 'border-slate-300 bg-slate-50'
+                    }`}>
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          A. Total Penerimaan ATK
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
                           printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
                         }`}>
                           {formatRp(totalPenerimaan)}
-                        </td>
-                        <td className={`p-2 border-r border-slate-300 text-right font-mono font-black ${
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Panjar pendaftaran perkara
+                        </span>
+                      </div>
+
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          B. Total Pengeluaran ATK
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
                           printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
                         }`}>
                           {formatRp(totalPengeluaran)}
-                        </td>
-                        <td className={`p-2 border-r border-slate-300 text-right font-mono font-black ${
-                          printColorMode === 'color' ? 'text-purple-800' : 'text-slate-900'
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Realisasi & simulasi ATK
+                        </span>
+                      </div>
+
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          C. Sisa Saldo ATK Periode
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
                         }`}>
                           {formatRp(saldoAkhir)}
-                        </td>
-                        <td className="p-2 text-center text-[10px] font-bold text-slate-500">
-                          BALANCE
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Sisa kas ATK kantor berjalan
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          D. Status Saldo Putus Rp 0
+                        </span>
+                        <strong className={`text-xs font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                        }`}>
+                          Tuntas Sesuai Aturan
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Tersimpan di Sheet
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* REKAP RINCIAN PENGELUARAN PER KATEGORI ATK */}
+                    <div className="border border-slate-300 rounded-lg overflow-hidden">
+                      <div className="bg-slate-100 px-3 py-1.5 font-bold text-[11px] border-b border-slate-300 flex justify-between items-center text-slate-800">
+                        <span>REKAPITULASI PENGELUARAN PER KELOMPOK ATK (STANDAR MAHKAMAH AGUNG RI)</span>
+                        <span className="text-[10px] font-mono">Total Item: {countSimulasi}</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 divide-x divide-y sm:divide-y-0 divide-slate-200 text-[11px] p-2 bg-white">
+                        {(Object.entries(categoryBreakdown) as [string, { total: number; count: number }][]).map(([cat, data]) => (
+                          <div key={cat} className="p-2 text-center">
+                            <span className="text-[10px] font-bold text-slate-500 block">{cat}</span>
+                            <strong className="font-mono font-bold text-slate-800 block">
+                              {formatRp(data.total)}
+                            </strong>
+                            <span className="text-[9px] text-slate-400">{data.count} transaksi</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* TABEL BUKU BESAR PEMBANTU KAS ATK PERKARA */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse border border-slate-300 text-[11px]">
+                        <thead>
+                          <tr className="bg-slate-100 font-bold border-b border-slate-300 text-center text-slate-800">
+                            <th className="p-1.5 border-r border-slate-300 w-10">NO</th>
+                            <th className="p-1.5 border-r border-slate-300 w-24">TANGGAL</th>
+                            <th className="p-1.5 border-r border-slate-300 w-36">NOMOR PERKARA</th>
+                            <th className="p-1.5 border-r border-slate-300">URAIAN PENGELUARAN / JENIS ATK</th>
+                            <th className="p-1.5 border-r border-slate-300 text-right w-28">PENERIMAAN (DEBET)</th>
+                            <th className="p-1.5 border-r border-slate-300 text-right w-28">PENGELUARAN (KREDIT)</th>
+                            <th className="p-1.5 text-right w-28">SALDO</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {ledgerWithBalance.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="p-6 text-center text-slate-400 italic">
+                                Tidak ada data transaksi ATK pada periode yang dipilih ({periodeTeks}).
+                              </td>
+                            </tr>
+                          ) : (
+                            ledgerWithBalance.map((row) => (
+                              <tr key={row.id} className="hover:bg-slate-50">
+                                <td className="p-1.5 border-r border-slate-200 text-center font-bold text-slate-700">
+                                  {row.no}
+                                </td>
+                                <td className="p-1.5 border-r border-slate-200 font-mono whitespace-nowrap text-center text-slate-700">
+                                  {row.tanggal}
+                                </td>
+                                <td className="p-1.5 border-r border-slate-200 font-mono font-bold whitespace-nowrap text-slate-900">
+                                  {row.nomorPerkara}
+                                </td>
+                                <td className="p-1.5 border-r border-slate-200">
+                                  <span className="font-semibold block text-slate-900">{row.uraian}</span>
+                                  <span className="text-[10px] text-slate-500 block">
+                                    Pihak: {row.namaPihak} • Kat: {row.kategori}
+                                  </span>
+                                </td>
+                                <td className={`p-1.5 border-r border-slate-200 text-right font-mono font-bold ${
+                                  printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                                }`}>
+                                  {row.penerimaan > 0 ? formatRp(row.penerimaan) : '-'}
+                                </td>
+                                <td className={`p-1.5 border-r border-slate-200 text-right font-mono font-bold ${
+                                  printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
+                                }`}>
+                                  {row.pengeluaran > 0 ? formatRp(row.pengeluaran) : '-'}
+                                </td>
+                                <td className={`p-1.5 text-right font-mono font-black ${
+                                  printColorMode === 'color' ? 'text-purple-800' : 'text-slate-900'
+                                }`}>
+                                  {formatRp(row.saldo)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-xs text-slate-900">
+                            <td colSpan={4} className="p-2 border-r border-slate-300 text-center font-black uppercase tracking-wider">
+                              JUMLAH TOTAL PERIODE INI
+                            </td>
+                            <td className={`p-2 border-r border-slate-300 text-right font-mono font-black ${
+                              printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                            }`}>
+                              {formatRp(totalPenerimaan)}
+                            </td>
+                            <td className={`p-2 border-r border-slate-300 text-right font-mono font-black ${
+                              printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
+                            }`}>
+                              {formatRp(totalPengeluaran)}
+                            </td>
+                            <td className={`p-2 text-right font-mono font-black ${
+                              printColorMode === 'color' ? 'text-purple-800' : 'text-slate-900'
+                            }`}>
+                              {formatRp(saldoAkhir)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </>
+                )}
 
                 {/* LEMBAR PENGESAHAN TANDA TANGAN RESMI KEPANITERAAN */}
                 <div className="pt-6 border-t border-slate-300 break-inside-avoid">
@@ -1361,7 +1843,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
                   {ttdLayout === '3_kolom' ? (
                     <div className="grid grid-cols-3 gap-4 text-center text-xs">
-                      {/* Kolom 1: Mengetahui Ketua */}
                       <div className="space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Mengetahui,</p>
@@ -1377,7 +1858,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Kolom 2: Memeriksa Panitera */}
                       <div className="space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Memeriksa,</p>
@@ -1393,11 +1873,10 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Kolom 3: Dibuat Oleh Kasir / Pengelola ATK */}
                       <div className="space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Dibuat Oleh,</p>
-                          <p className="font-black text-slate-900">Kasir / Pengelola ATK Perkara</p>
+                          <p className="font-black text-slate-900">Kasir / Pengelola Persediaan ATK</p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="font-black text-slate-900 underline underline-offset-2">
@@ -1428,7 +1907,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                       <div className="space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Dibuat Oleh,</p>
-                          <p className="font-black text-slate-900">Kasir / Pengelola ATK Perkara</p>
+                          <p className="font-black text-slate-900">Kasir / Pengelola Persediaan ATK</p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="font-black text-slate-900 underline underline-offset-2">
@@ -1445,7 +1924,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                       <div className="w-72 space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Dibuat Oleh,</p>
-                          <p className="font-black text-slate-900">Kasir / Pengelola ATK Perkara</p>
+                          <p className="font-black text-slate-900">Kasir / Pengelola Persediaan ATK</p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="font-black text-slate-900 underline underline-offset-2">
@@ -1459,7 +1938,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     </div>
                   )}
 
-                  {/* Catatan Kaki Resmi */}
                   <div className="mt-8 pt-2 border-t border-slate-200 flex items-center justify-between text-[9px] text-slate-400">
                     <span>Dokumen ini dicetak resmi melalui Sistem Manajemen Perkara • Tersinkronisasi Tab SimulasiAtkPerkara Google Spreadsheet</span>
                     <span>Format Resmi Pengadilan Agama</span>
