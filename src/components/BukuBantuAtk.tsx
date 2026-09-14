@@ -6,7 +6,12 @@ import {
   Boxes, PackageCheck, Layers, PieChart, Info
 } from 'lucide-react';
 import { CaseRecord, SimulasiAtkRecord, JurnalBiayaSkumRecord } from '../types';
-import { ATK_REFERENCE_ITEMS, generateAtkSimulationDeterministic } from '../data/atkRubric';
+import { 
+  ATK_REFERENCE_ITEMS, 
+  generateAtkSimulationDeterministic, 
+  redistributeAllCasesAtk, 
+  migrateLegacySimulasiAtkRecords 
+} from '../data/atkRubric';
 import { SyncService } from '../services/syncService';
 import { LaporanResmiAtkModal } from './LaporanResmiAtkModal';
 import { 
@@ -79,6 +84,7 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [isBatchSimulating, setIsBatchSimulating] = useState(false);
+  const [isRedistributing, setIsRedistributing] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [syncStatusMsg, setSyncStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -487,6 +493,32 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
       }
       setTimeout(() => setSyncStatusMsg(null), 6000);
     }
+  };
+
+  // Atur ulang dan distribusikan standar ATK baru (Jarum & Benang) ke seluruh perkara
+  const handleRedistributeNewStandard = async () => {
+    if (!window.confirm('Apakah Anda yakin ingin mengatur ulang dan mendistribusikan standar ATK baru (Jarum & Benang) ke seluruh sistem perkara? Rincian simulasi ATK akan diselaraskan dengan 16 item standar resmi.')) {
+      return;
+    }
+
+    setIsRedistributing(true);
+    const updated = redistributeAllCasesAtk(cases, simulasiAtkRecords);
+    onSaveSimulasiAtkRecords(updated, false);
+
+    if (googleSheetWebhookUrl) {
+      setSyncStatusMsg({ type: 'success', text: 'Menyinkronkan pembaruan standar ATK (Jarum & Benang) ke Google Sheets...' });
+      const res = await SyncService.pushSimulasiAtkToCloud(googleSheetWebhookUrl, updated);
+      if (res.success) {
+        setSyncStatusMsg({ type: 'success', text: 'Berhasil mengatur ulang dan mendistribusikan standar ATK (Jarum & Benang) ke Google Sheets!' });
+      } else {
+        setSyncStatusMsg({ type: 'error', text: 'Tersimpan di sistem lokal. Pastikan Apps Script aktif untuk sinkronisasi Google Sheets.' });
+      }
+      setTimeout(() => setSyncStatusMsg(null), 5000);
+    } else {
+      setSyncStatusMsg({ type: 'success', text: 'Berhasil mengatur ulang dan mendistribusikan standar ATK baru (Jarum & Benang) ke seluruh sistem!' });
+      setTimeout(() => setSyncStatusMsg(null), 5000);
+    }
+    setIsRedistributing(false);
   };
 
   // Reset simulation for a case
@@ -1400,9 +1432,12 @@ if (sheetSimAtk) {
                   <option value="Kertas">Kertas</option>
                   <option value="Map">Map & Sampul</option>
                   <option value="Tinta">Tinta & Ribbon</option>
-                  <option value="Materai & Pos">Materai & Pos</option>
-                  <option value="Alat Tulis">Alat Tulis</option>
-                  <option value="Buku Register">Buku Register & Jurnal</option>
+                  <option value="Alat Jahit">Alat Jahit (Jarum & Benang)</option>
+                  <option value="Alat Tulis">Alat Tulis & Pulpen</option>
+                  <option value="Klip">Klip Penjepit</option>
+                  <option value="Staples">Staples & Hekter</option>
+                  <option value="Catridge">Catridge Printer</option>
+                  <option value="Arsip">Arsip & Lakban</option>
                 </select>
               </div>
 
@@ -1626,7 +1661,7 @@ if (sheetSimAtk) {
         <div className={`rounded-2xl border overflow-hidden transition-all ${
           isLight ? 'bg-white border-slate-200/80 shadow-xs' : 'bg-slate-900 border-slate-800'
         }`}>
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-black text-sm text-slate-800 dark:text-slate-100 flex items-center space-x-2">
                 <span>📋 Tabel Standar Rincian Pengeluaran ATK Perkara</span>
@@ -1635,9 +1670,18 @@ if (sheetSimAtk) {
                 </span>
               </h2>
               <p className="text-xs text-slate-500">
-                Rujukan resmi yang digunakan oleh model AI untuk mensimulasikan pemakaian ATK setiap perkara hingga saldo menjadi Rp 0.
+                Rujukan resmi standar ATK perkara (termasuk Jarum & Benang jahit berkas) yang digunakan untuk mendistribusikan rincian ATK perkara hingga saldo Rp 0.
               </p>
             </div>
+            <button
+              onClick={handleRedistributeNewStandard}
+              disabled={isRedistributing}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 flex items-center space-x-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+              title="Atur ulang dan distribusikan standar ATK baru (Jarum & Benang) ke seluruh perkara di sistem"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRedistributing ? 'animate-spin' : ''}`} />
+              <span>{isRedistributing ? 'Mendistribusikan...' : 'Atur Ulang & Distribusikan ke Sistem'}</span>
+            </button>
           </div>
 
           <div className="overflow-x-auto">

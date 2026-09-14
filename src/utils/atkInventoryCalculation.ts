@@ -112,15 +112,15 @@ export const MASTER_PERSEDIAAN_ATK: MasterItemDef[] = [
     keywords: ['bundel a permohonan', 'map bundel a permohonan']
   },
   {
-    key: 'buku-sidang',
+    key: 'jarum-jahit-berkas',
     kodeBarang: 'BRG-ATK-07',
-    namaBarang: 'Buku Catatan Persidangan & Register Sidang',
-    kategori: 'Buku',
-    satuan: 'Buku',
-    hargaSatuan: 10000,
-    qtyDefaultPerNominal: (nom) => Number((nom / 10000).toFixed(2)),
-    keterangan: 'Buku instrumen pencatatan agenda persidangan perkara oleh Panitera Pengganti (porsi 0.5 buku)',
-    keywords: ['buku catatan', 'register sidang', 'buku sidang']
+    namaBarang: 'Jarum Jahit / Tindik Berkas Perkara',
+    kategori: 'Alat Jahit',
+    satuan: 'Buah',
+    hargaSatuan: 5000,
+    qtyDefaultPerNominal: (nom) => Math.max(1, Math.round(nom / 5000)),
+    keterangan: 'Jarum jahit/tindik berkas untuk pelubangan & penjahitan bundel perkara (porsi 1 buah/perkara)',
+    keywords: ['jarum', 'jarum jahit', 'jarum tindik', 'jarum jilid', 'tindik berkas', 'buku catatan', 'register sidang']
   },
   {
     key: 'pulpen-sidang',
@@ -145,15 +145,15 @@ export const MASTER_PERSEDIAAN_ATK: MasterItemDef[] = [
     keywords: ['tinta epson', 'epson', 'epson 1/20']
   },
   {
-    key: 'materai-leges',
+    key: 'benang-jahit-berkas',
     kodeBarang: 'BRG-ATK-10',
-    namaBarang: 'Bea Meterai Leges Bukti Surat Perkara (Rp 10.000)',
-    kategori: 'Materai',
-    satuan: 'Keping',
+    namaBarang: 'Benang Jahit / Kasur Jilid Berkas Perkara',
+    kategori: 'Alat Jahit',
+    satuan: 'Gulung',
     hargaSatuan: 10000,
     qtyDefaultPerNominal: (nom) => Math.max(1, Math.round(nom / 10000)),
-    keterangan: 'Bea materai untuk pemeteraian kemudian (leges) alat bukti surat para pihak di persidangan',
-    keywords: ['materai', 'meterai', 'leges', 'bukti surat']
+    keterangan: 'Benang kasur/jahit berkas untuk perakitan & penjilidan bundel perkara (porsi 1 gulung/perkara)',
+    keywords: ['benang', 'benang jahit', 'benang kasur', 'benang jilid', 'benang rami', 'materai', 'meterai', 'leges']
   },
   {
     key: 'tinta-canon',
@@ -267,12 +267,18 @@ export function matchToMasterPersediaan(uraian: string, kategori?: string): Mast
     return MASTER_PERSEDIAAN_ATK[1]; // map
   } else if (k.includes('amplop')) {
     return MASTER_PERSEDIAAN_ATK[3]; // amplop
+  } else if (k.includes('jarum') || u.includes('jarum') || u.includes('tindik')) {
+    return MASTER_PERSEDIAAN_ATK[6]; // jarum jahit berkas
+  } else if (k.includes('benang') || u.includes('benang') || u.includes('kasur')) {
+    return MASTER_PERSEDIAAN_ATK[9]; // benang jahit berkas
+  } else if (k.includes('jahit')) {
+    return u.includes('benang') ? MASTER_PERSEDIAAN_ATK[9] : MASTER_PERSEDIAAN_ATK[6];
   } else if (k.includes('tinta')) {
     return MASTER_PERSEDIAAN_ATK[8]; // tinta
-  } else if (k.includes('materai') || k.includes('meterai')) {
-    return MASTER_PERSEDIAAN_ATK[9]; // materai
   } else if (k.includes('catridge')) {
     return MASTER_PERSEDIAAN_ATK[11]; // catridge
+  } else if (k.includes('materai') || k.includes('meterai')) {
+    return MASTER_PERSEDIAAN_ATK[9]; // fallback legacy materai ke benang jahit
   }
 
   // Default item untuk ATK Lainnya

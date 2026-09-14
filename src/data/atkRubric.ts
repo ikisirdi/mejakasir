@@ -49,10 +49,10 @@ export const ATK_REFERENCE_ITEMS: SimulasiAtkItemRef[] = [
   },
   {
     no: 7,
-    jenisAtk: 'Buku Catatan Persidangan & Register Sidang',
-    hargaSatuan: 10000,
+    jenisAtk: 'Jarum Jahit Berkas Perkara',
+    hargaSatuan: 5000,
     jumlah: 5000,
-    keterangan: 'Buku instrumen pencatatan agenda persidangan perkara'
+    keterangan: 'Jarum jahit/tindik berkas untuk pelubangan & penjahitan bundel berkas perkara'
   },
   {
     no: 8,
@@ -70,10 +70,10 @@ export const ATK_REFERENCE_ITEMS: SimulasiAtkItemRef[] = [
   },
   {
     no: 10,
-    jenisAtk: 'Materai untuk Keperluan Leges Bukti Surat Perkara',
+    jenisAtk: 'Benang Jahit Berkas Perkara',
     hargaSatuan: 10000,
     jumlah: 10000,
-    keterangan: 'Bea materai untuk pemeteraian kemudian (leges) alat bukti surat para pihak'
+    keterangan: 'Benang kasur/jahit berkas untuk perakitan & penjilidan bundel perkara'
   },
   {
     no: 11,
@@ -244,7 +244,7 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
   }
 
   // Rangkaian 16 jenis ATK tersusun secara kronologis berurutan dari perkara masuk s/d selesai
-  // Sesuai instruksi resmi: rincian detail per item (termasuk Materai untuk keperluan leges), tanpa kategori gabungan/generik
+  // Sesuai rujukan standar: rincian detail per item (termasuk Jarum & Benang jahit berkas), tanpa kategori gabungan/generik
   const selectedItems: {
     jenisAtk: string;
     jumlah: number;
@@ -294,12 +294,12 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       timelineRatio: 0.28 // Awal persidangan
     },
     {
-      jenisAtk: 'Buku Catatan Persidangan & Register Sidang',
+      jenisAtk: 'Jarum Jahit Berkas Perkara',
       jumlah: 5000,
-      kategori: 'Buku',
-      keterangan: 'Buku instrumen pencatatan agenda persidangan perkara oleh Panitera Pengganti',
+      kategori: 'Alat Jahit',
+      keterangan: 'Jarum jahit/tindik berkas untuk pelubangan & penjahitan bundel perkara',
       tahap: 'Sidang Awal',
-      timelineRatio: 0.35 // Tahap pembukaan sidang
+      timelineRatio: 0.35 // Tahap pembukaan sidang / jilid berkas
     },
     {
       jenisAtk: 'Pembelian Pulpen Sidang & Penandatanganan Berita Acara',
@@ -318,12 +318,12 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
       timelineRatio: 0.52 // Pertengahan persidangan
     },
     {
-      jenisAtk: 'Materai untuk Keperluan Leges Bukti Surat Perkara',
+      jenisAtk: 'Benang Jahit Berkas Perkara',
       jumlah: 10000,
-      kategori: 'Materai',
-      keterangan: 'Bea materai untuk pemeteraian kemudian (leges) alat bukti surat para pihak di persidangan',
+      kategori: 'Alat Jahit',
+      keterangan: 'Benang kasur/jahit berkas untuk perakitan & penjilidan bundel perkara',
       tahap: 'Pemeriksaan Sidang',
-      timelineRatio: 0.60 // Tahap pembuktian alat bukti surat
+      timelineRatio: 0.60 // Tahap penjilidan & pemberkasan sidang
     },
     {
       jenisAtk: 'Tinta Refiil Canon 1/10',
@@ -417,9 +417,11 @@ export function generateAtkSimulationDeterministic(params: GenerateSimulasiParam
 }
 
 /**
- * Migrasi otomatis data lama dari cache lokal atau spreadsheet
- * jika masih mengandung teks generik "Pembelian Alat tulis kantor lainnya..."
- * Menggantikannya dengan 16 item rincian spesifik (termasuk Materai leges).
+ * Migrasi otomatis data lama dari cache lokal atau spreadsheet:
+ * 1. Mengganti jenis ATK lama:
+ *    - "Buku Catatan Persidangan & Register Sidang" -> "Jarum Jahit Berkas Perkara"
+ *    - "Materai untuk Keperluan Leges Bukti Surat Perkara" -> "Benang Jahit Berkas Perkara"
+ * 2. Mengganti teks generik/gabungan dengan 16 item rincian spesifik standar.
  */
 export function migrateLegacySimulasiAtkRecords(
   records: SimulasiAtkRecord[],
@@ -427,8 +429,34 @@ export function migrateLegacySimulasiAtkRecords(
 ): SimulasiAtkRecord[] {
   if (!records || records.length === 0) return [];
 
-  // Cari apakah ada baris yang mengandung deskripsi gabungan/generik lama
-  const hasLegacyItems = records.some(r => {
+  // 1. Transformasi langsung item Buku Catatan -> Jarum dan Materai Leges -> Benang
+  let transformed = records.map(r => {
+    const u = (r.uraian || '').toLowerCase();
+    if (u.includes('buku catatan persidangan') || u.includes('register sidang')) {
+      return {
+        ...r,
+        uraian: 'Jarum Jahit Berkas Perkara',
+        kategori: 'Alat Jahit',
+        keterangan: (r.keterangan || '').includes('[') 
+          ? r.keterangan.replace(/Buku.*$/i, 'Jarum jahit/tindik berkas untuk pelubangan & penjahitan bundel perkara')
+          : 'Jarum jahit/tindik berkas untuk pelubangan & penjahitan bundel perkara [Sidang Awal]'
+      };
+    }
+    if (u.includes('materai untuk keperluan leges') || u.includes('meterai leges') || (u.includes('materai') && u.includes('leges'))) {
+      return {
+        ...r,
+        uraian: 'Benang Jahit Berkas Perkara',
+        kategori: 'Alat Jahit',
+        keterangan: (r.keterangan || '').includes('[')
+          ? r.keterangan.replace(/Materai.*$/i, 'Benang kasur/jahit berkas untuk perakitan & penjilidan bundel perkara')
+          : 'Benang kasur/jahit berkas untuk perakitan & penjilidan bundel perkara [Pemeriksaan Sidang]'
+      };
+    }
+    return r;
+  });
+
+  // 2. Cari apakah ada baris yang mengandung deskripsi gabungan/generik lama
+  const hasLegacyItems = transformed.some(r => {
     const u = (r.uraian || '').toLowerCase();
     return u.includes('pembelian alat tulis kantor lainnya') ||
            u.includes('alat tulis kantor lainnya yang meliputi') ||
@@ -436,11 +464,11 @@ export function migrateLegacySimulasiAtkRecords(
            u.includes('kebutuhan minum para pihak');
   });
 
-  if (!hasLegacyItems) return records;
+  if (!hasLegacyItems) return transformed;
 
   // Kelompokkan nomor perkara yang perlu diperbarui
   const casesWithLegacy = new Set<string>();
-  records.forEach(r => {
+  transformed.forEach(r => {
     const u = (r.uraian || '').toLowerCase();
     if (
       u.includes('pembelian alat tulis kantor lainnya') ||
@@ -454,7 +482,7 @@ export function migrateLegacySimulasiAtkRecords(
     }
   });
 
-  let migrated = records.filter(r => {
+  let migrated = transformed.filter(r => {
     const no = (r.nomorPerkara || '').trim().toLowerCase();
     return !casesWithLegacy.has(no);
   });
@@ -473,6 +501,46 @@ export function migrateLegacySimulasiAtkRecords(
   });
 
   return migrated;
+}
+
+/**
+ * Mendistribusikan ulang standar ATK baru (Jarum & Benang) ke seluruh perkara
+ * yang memiliki catatan simulasi maupun berstatus Putus/Selesai.
+ */
+export function redistributeAllCasesAtk(
+  caseList: CaseRecord[],
+  currentRecords: SimulasiAtkRecord[]
+): SimulasiAtkRecord[] {
+  if (!caseList || caseList.length === 0) return currentRecords;
+
+  // Nomor perkara yang sudah pernah disimulasikan atau berstatus putus
+  const simulatedCaseNumbers = new Set(
+    currentRecords.map(r => (r.nomorPerkara || '').trim().toLowerCase()).filter(Boolean)
+  );
+
+  const newRecords: SimulasiAtkRecord[] = [];
+
+  caseList.forEach(c => {
+    const norm = (c.nomorPerkara || '').trim().toLowerCase();
+    const shouldRegenerate = simulatedCaseNumbers.has(norm) ||
+      c.status === 'Putus' || c.status === 'Selesai' || c.status === 'Minutasi' || c.status === 'Arsip';
+
+    if (shouldRegenerate) {
+      const items = generateAtkSimulationDeterministic({
+        caseRecord: c,
+        targetAmount: 100000,
+        tanggalMasuk: c.tanggalRegister,
+        tanggalSelesai: c.tanggalPutus || c.tanggalRegister || new Date().toISOString().split('T')[0]
+      });
+      newRecords.push(...items);
+    }
+  });
+
+  // Pertahankan record non-perkara atau perkara lain yang tidak ada di caseList
+  const handledCaseNos = new Set(caseList.map(c => (c.nomorPerkara || '').trim().toLowerCase()));
+  const untouched = currentRecords.filter(r => !handledCaseNos.has((r.nomorPerkara || '').trim().toLowerCase()));
+
+  return [...newRecords, ...untouched];
 }
 
 /**
