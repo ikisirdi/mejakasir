@@ -13,7 +13,9 @@ import {
   FileText,
   Boxes,
   BookOpen,
-  Filter
+  Filter,
+  Clock,
+  Layers
 } from 'lucide-react';
 import { CaseRecord, SimulasiAtkRecord } from '../types';
 import { 
@@ -81,6 +83,10 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   const [filterPerkaraStatus, setFilterPerkaraStatus] = useState<'all' | 'putus' | 'aktif'>('all');
   const [filterNomorPerkara, setFilterNomorPerkara] = useState<string>(initialFilterPerkara);
   const [showConfig, setShowConfig] = useState<boolean>(false);
+
+  // Mode Aliran Kas & Tingkat Rincian BKU
+  const [bkuModeDistribusi, setBkuModeDistribusi] = useState<'hari-sama' | 'bertahap'>('hari-sama');
+  const [bkuModeRincian, setBkuModeRincian] = useState<'gabung-kategori' | 'kelompok-perkara' | 'item-detail'>('gabung-kategori');
 
   // Print Mode & Page Setup States
   const [printColorMode, setPrintColorMode] = useState<'color' | 'bw'>('color');
@@ -302,10 +308,18 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     return summary;
   }, [filteredLedger]);
 
-  // 6. Kalkulasi Buku Kas Format Standar BKU (Rekapitulasi Kelompok ATK & Sisa Saldo Sesuai Format Mahkamah Agung)
+  // 6. Kalkulasi Buku Kas Format Standar BKU (Sesuai Format Mahkamah Agung)
   const bkuResult: BkuCalculationResult = useMemo(() => {
-    return calculateBkuAtkLedger(cases, simulasiAtkRecords, selectedMonth, selectedYear, filterNomorPerkara);
-  }, [cases, simulasiAtkRecords, selectedMonth, selectedYear, filterNomorPerkara]);
+    return calculateBkuAtkLedger(
+      cases, 
+      simulasiAtkRecords, 
+      selectedMonth, 
+      selectedYear, 
+      filterNomorPerkara,
+      bkuModeDistribusi,
+      bkuModeRincian
+    );
+  }, [cases, simulasiAtkRecords, selectedMonth, selectedYear, filterNomorPerkara, bkuModeDistribusi, bkuModeRincian]);
 
   const periodeTeks = selectedMonth !== 'all' 
     ? `BULAN ${MONTH_LABELS[selectedMonth]?.toUpperCase() || selectedMonth} ${selectedYear !== 'all' ? selectedYear : ''}` 
@@ -680,8 +694,8 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
     // -------------------------------------------------------------
     // TEMPLATE BUKU KAS ATK FORMAT STANDAR BKU (SESUAI GAMBAR RESMI PENGADILAN)
-    // Kolom: No, Tanggal, Nomor B/K, Kode Referensi, Uraian, Debit, Kredit, Saldo
-    // Sub-header penomoran: 1, 2, 3, 4, 5, 6, 7, 8
+    // Kolom: No, Tanggal, Uraian, Debit, Kredit, Saldo
+    // Sub-header penomoran: 1, 2, 3, 4, 5, 6
     // Baris Saldo Awal, Pengeluaran Rekapitulasi Kelompok ATK, Penerimaan, Sisa Saldo, dan Jumlah
     // -------------------------------------------------------------
     if (reportType === 'buku-kas-bku') {
@@ -700,12 +714,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
             </td>
             <td style="padding: 5px 6px; text-align: center; white-space: nowrap; border-right: 1px solid #000000;">
               ${r.tanggal}
-            </td>
-            <td style="padding: 5px 6px; text-align: center; font-family: monospace; border-right: 1px solid #000000;">
-              ${r.nomorBk || ''}
-            </td>
-            <td style="padding: 5px 6px; text-align: center; font-family: monospace; border-right: 1px solid #000000;">
-              ${r.kodeReferensi || ''}
             </td>
             <td style="padding: 5px 6px; border-right: 1px solid #000000; font-weight: ${isSpecial ? '700' : 'normal'};">
               ${r.uraian}
@@ -923,18 +931,16 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     </div>
   </div>
 
-  <!-- TABEL STANDAR BKU RESMI SESUAI CONTOH GAMBAR (NO, TANGGAL, NO B/K, KODE REF, URAIAN, DEBIT, KREDIT, SALDO) -->
+  <!-- TABEL STANDAR BKU RESMI (NO, TANGGAL, URAIAN, DEBIT, KREDIT, SALDO) -->
   <table class="bku-table">
     <thead>
       <tr>
-        <th style="width: 38px;">No</th>
-        <th style="width: 105px;">Tanggal</th>
-        <th style="width: 110px;">Nomor B/K</th>
-        <th style="width: 85px;">Kode Referensi</th>
+        <th style="width: 42px;">No</th>
+        <th style="width: 120px;">Tanggal</th>
         <th>Uraian</th>
-        <th style="width: 105px; text-align: right;">Debit</th>
-        <th style="width: 105px; text-align: right;">Kredit</th>
-        <th style="width: 110px; text-align: right;">Saldo</th>
+        <th style="width: 125px; text-align: right;">Debit</th>
+        <th style="width: 125px; text-align: right;">Kredit</th>
+        <th style="width: 130px; text-align: right;">Saldo</th>
       </tr>
       <tr class="sub-head">
         <th>1</th>
@@ -943,8 +949,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
         <th>4</th>
         <th>5</th>
         <th>6</th>
-        <th>7</th>
-        <th>8</th>
       </tr>
     </thead>
     <tbody>
@@ -952,7 +956,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     </tbody>
     <tfoot>
       <tr>
-        <td colspan="5" style="text-align: center; font-weight: 800; text-transform: uppercase; border-right: 1px solid #000000;">
+        <td colspan="3" style="text-align: center; font-weight: 800; text-transform: uppercase; border-right: 1px solid #000000;">
           Jumlah
         </td>
         <td style="text-align: right; font-family: monospace; font-weight: 800; border-right: 1px solid #000000; color: ${cDebet};">
@@ -1381,12 +1385,10 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       document.body.removeChild(link);
     } else if (reportType === 'buku-kas-bku') {
       const filename = `Buku_Kas_BKU_ATK_${namaPengadilan.replace(/\s+/g, '_')}_${periodStr}.csv`;
-      const headers = ['No', 'Tanggal', 'Nomor B/K', 'Kode Referensi', 'Uraian', 'Debit', 'Kredit', 'Saldo'];
+      const headers = ['No', 'Tanggal', 'Uraian', 'Debit', 'Kredit', 'Saldo'];
       const rows = bkuResult.rows.map(r => [
         r.no,
         `"${r.tanggal}"`,
-        `"${r.nomorBk}"`,
-        `"${r.kodeReferensi}"`,
         `"${r.uraian.replace(/"/g, '""')}"`,
         r.debit || 0,
         r.kredit || 0,
@@ -1394,8 +1396,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       ]);
       // Tambahkan baris total jumlah
       rows.push([
-        '',
-        '',
         '',
         '',
         '"JUMLAH"',
@@ -1500,7 +1500,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     </DialogTitle>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       {reportType === 'buku-kas-bku'
-                        ? 'Format Standar BKU: Rekapitulasi Kelompok ATK (No, Tanggal, No B/K, Kode Ref, Uraian, Debit, Kredit, Saldo)'
+                        ? 'Format Standar BKU: Rekapitulasi Kelompok ATK (No, Tanggal, Uraian, Debit, Kredit, Saldo)'
                         : 'Format Cetak Standar Pengadilan Agama • Mendukung Warna Sistem Penuh & Multi-Halaman Bersih'}
                     </p>
                   </div>
@@ -1518,7 +1518,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                           ? 'bg-purple-600 text-white shadow-xs'
                           : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
                       }`}
-                      title="Format Standar BKU dengan Kolom: No, Tanggal, No B/K, Kode Ref, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK"
+                      title="Format Standar BKU dengan Kolom: No, Tanggal, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK"
                     >
                       <BookOpen className="w-3.5 h-3.5" />
                       <span>Buku Kas (Format BKU)</span>
@@ -1740,6 +1740,106 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                   </select>
                 </div>
               </div>
+
+              {/* SUB-BAR KHUSUS BUKU KAS BKU: OPSI ALIRAN PENGELUARAN & TINGKAT RINCIAN TRANSAKSI */}
+              {reportType === 'buku-kas-bku' && (
+                <div className={`px-5 py-2.5 border-b flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 print:hidden ${
+                  isLight ? 'bg-purple-50/50 border-purple-200 text-slate-700' : 'bg-slate-800/90 border-slate-700 text-slate-200'
+                }`}>
+                  <div className="flex flex-wrap items-center gap-4">
+                    {/* Mode Aliran Kas: Hari Tersebut Juga vs Bertahap Dalam Bulan */}
+                    <div className="flex items-center space-x-1.5">
+                      <span className="font-bold text-purple-900 dark:text-purple-300 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-purple-600" />
+                        Aliran Kas:
+                      </span>
+                      <div className="flex items-center bg-white dark:bg-slate-900 rounded-lg p-0.5 border border-purple-200 dark:border-purple-800">
+                        <button
+                          type="button"
+                          id="btn-bku-distribusi-hari-sama"
+                          onClick={() => setBkuModeDistribusi('hari-sama')}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                            bkuModeDistribusi === 'hari-sama'
+                              ? 'bg-purple-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-purple-600'
+                          }`}
+                          title="Debit masuk tanggal tersebut, pengeluaran dikreditkan hari tersebut juga (anti-minus)"
+                        >
+                          Hari Masuk (Hari Tersebut Juga)
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-bku-distribusi-bertahap"
+                          onClick={() => setBkuModeDistribusi('bertahap')}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                            bkuModeDistribusi === 'bertahap'
+                              ? 'bg-purple-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-purple-600'
+                          }`}
+                          title="Pengeluaran berjalan bertahap selama bulan tersebut belum berakhir"
+                        >
+                          Bertahap Dalam Bulan
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Mode Rincian Transaksi */}
+                    <div className="flex items-center space-x-1.5">
+                      <span className="font-bold text-purple-900 dark:text-purple-300 flex items-center gap-1">
+                        <Layers className="w-3.5 h-3.5 text-purple-600" />
+                        Tingkat Rincian:
+                      </span>
+                      <div className="flex items-center bg-white dark:bg-slate-900 rounded-lg p-0.5 border border-purple-200 dark:border-purple-800">
+                        <button
+                          type="button"
+                          id="btn-bku-rincian-gabung"
+                          onClick={() => setBkuModeRincian('gabung-kategori')}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                            bkuModeRincian === 'gabung-kategori'
+                              ? 'bg-purple-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-purple-600'
+                          }`}
+                          title="Uraian digabung per kategori barang ATK dengan menyebutkan daftar nomor perkaranya (misal: Kertas untuk perkara nomor sekian dan sekian)"
+                        >
+                          Gabung Uraian (Default)
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-bku-rincian-kategori"
+                          onClick={() => setBkuModeRincian('kelompok-perkara')}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                            bkuModeRincian === 'kelompok-perkara'
+                              ? 'bg-purple-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-purple-600'
+                          }`}
+                          title="Uraian dipisah per nomor perkara masing-masing"
+                        >
+                          Pisah Per Perkara
+                        </button>
+                        <button
+                          type="button"
+                          id="btn-bku-rincian-item"
+                          onClick={() => setBkuModeRincian('item-detail')}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+                            bkuModeRincian === 'item-detail'
+                              ? 'bg-purple-600 text-white shadow-xs'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-purple-600'
+                          }`}
+                          title="Rincian lengkap per 16 item barang ATK persediaan"
+                        >
+                          Rinci 16 Item
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="inline-flex items-center gap-1 font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                      ✓ Saldo Terproteksi (Debit Masuk Terlebih Dahulu)
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* COLLAPSIBLE CONFIGURATION PANEL FOR KOP, TTD & PEJABAT (PRINT HIDDEN) */}
               {showConfig && (
@@ -2156,8 +2256,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                           <tr className="bg-slate-100 font-bold border-b border-slate-400 text-center text-slate-800">
                             <th className="p-1.5 border-r border-slate-400 w-10">NO</th>
                             <th className="p-1.5 border-r border-slate-400 w-28">TANGGAL</th>
-                            <th className="p-1.5 border-r border-slate-400 w-28">NOMOR B/K</th>
-                            <th className="p-1.5 border-r border-slate-400 w-24">KODE REFERENSI</th>
                             <th className="p-1.5 border-r border-slate-400">URAIAN</th>
                             <th className="p-1.5 border-r border-slate-400 text-right w-28">DEBIT</th>
                             <th className="p-1.5 border-r border-slate-400 text-right w-28">KREDIT</th>
@@ -2169,9 +2267,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                             <th className="p-0.5 border-r border-slate-400">3</th>
                             <th className="p-0.5 border-r border-slate-400">4</th>
                             <th className="p-0.5 border-r border-slate-400">5</th>
-                            <th className="p-0.5 border-r border-slate-400">6</th>
-                            <th className="p-0.5 border-r border-slate-400">7</th>
-                            <th className="p-0.5">8</th>
+                            <th className="p-0.5">6</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-300">
@@ -2184,12 +2280,6 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                                 </td>
                                 <td className="p-1.5 border-r border-slate-300 whitespace-nowrap text-center text-slate-700 text-[10px]">
                                   {row.tanggal}
-                                </td>
-                                <td className="p-1.5 border-r border-slate-300 font-mono text-center text-slate-800 text-[10px]">
-                                  {row.nomorBk || '-'}
-                                </td>
-                                <td className="p-1.5 border-r border-slate-300 font-mono text-center text-slate-600 text-[10px]">
-                                  {row.kodeReferensi || '-'}
                                 </td>
                                 <td className={`p-1.5 border-r border-slate-300 ${isSpecial ? 'font-black text-slate-900' : 'text-slate-800'}`}>
                                   {row.uraian}
@@ -2215,7 +2305,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                         </tbody>
                         <tfoot>
                           <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-xs text-slate-900">
-                            <td colSpan={5} className="p-2 border-r border-slate-400 text-center font-black uppercase tracking-wider">
+                            <td colSpan={3} className="p-2 border-r border-slate-400 text-center font-black uppercase tracking-wider">
                               JUMLAH
                             </td>
                             <td className={`p-2 border-r border-slate-400 text-right font-mono font-black ${
