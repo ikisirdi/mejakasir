@@ -720,10 +720,10 @@ if (sheetSimAtk) {
                 }
               }}
               className="px-3.5 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-600/30 flex items-center space-x-1.5 transition-all transform active:scale-95"
-              title="Cetak Buku Kas Format Standar BKU (Kolom No, Tanggal, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK)"
+              title="Cetak Buku Bantu Biaya Proses / ATK Perkara (Kolom No, Tanggal, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK)"
             >
               <BookOpen className="w-4 h-4" />
-              <span>Cetak Buku Kas (Format BKU)</span>
+              <span>Cetak Buku Bantu Biaya Proses</span>
             </button>
 
             <button

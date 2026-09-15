@@ -384,7 +384,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
           </div>
           <div style="flex: 1; padding: 0 10px;">
             <div style="color: #334155;">Dibuat Oleh,</div>
-            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola Persediaan ATK</div>
+            <div style="font-weight: 800; margin-top: 2px;">Petugas Biaya Proses</div>
             <div style="height: 65px;"></div>
             <div style="font-weight: 800; text-decoration: underline;">${kasirNama}</div>
             <div style="font-size: 10px; font-family: monospace; color: #475569;">${kasirNip}</div>
@@ -403,7 +403,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
           </div>
           <div style="flex: 1; padding: 0 20px;">
             <div style="color: #334155;">Dibuat Oleh,</div>
-            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola Persediaan ATK</div>
+            <div style="font-weight: 800; margin-top: 2px;">Petugas Biaya Proses</div>
             <div style="height: 65px;"></div>
             <div style="font-weight: 800; text-decoration: underline;">${kasirNama}</div>
             <div style="font-size: 10px; font-family: monospace; color: #475569;">${kasirNip}</div>
@@ -415,7 +415,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
         <div style="display: flex; justify-content: flex-end; text-align: center; margin-top: 20px; page-break-inside: avoid;">
           <div style="width: 320px; padding: 0 10px;">
             <div style="color: #334155;">Dibuat Oleh,</div>
-            <div style="font-weight: 800; margin-top: 2px;">Kasir / Pengelola Persediaan ATK</div>
+            <div style="font-weight: 800; margin-top: 2px;">Petugas Biaya Proses</div>
             <div style="height: 65px;"></div>
             <div style="font-weight: 800; text-decoration: underline;">${kasirNama}</div>
             <div style="font-size: 10px; font-family: monospace; color: #475569;">${kasirNip}</div>
@@ -722,27 +722,28 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       const bkuTableRowsHtml = bkuResult.rows.map(r => {
         const isSaldoAwal = r.tipe === 'saldo-awal';
         const isSisaSaldo = r.tipe === 'sisa-saldo';
+        const isNihil = r.uraian === 'NIHIL';
         const isSpecial = isSaldoAwal || isSisaSaldo;
         const bgRow = isSpecial 
           ? (isColor ? '#f8fafc' : '#ffffff') 
-          : '#ffffff';
+          : isNihil ? (isColor ? '#fafafa' : '#ffffff') : '#ffffff';
 
         return `
           <tr style="border-bottom: 1px solid #000000; page-break-inside: avoid; background-color: ${bgRow};">
-            <td style="padding: 5px 6px; text-align: center; font-weight: ${isSpecial ? '700' : 'normal'}; border-right: 1px solid #000000;">
+            <td style="padding: 5px 6px; text-align: center; font-weight: ${isSpecial || isNihil ? '700' : 'normal'}; border-right: 1px solid #000000;">
               ${r.no}
             </td>
             <td style="padding: 5px 6px; text-align: center; white-space: nowrap; border-right: 1px solid #000000;">
-              ${r.tanggal}
+              ${isNihil ? '-' : r.tanggal}
             </td>
-            <td style="padding: 5px 6px; border-right: 1px solid #000000; font-weight: ${isSpecial ? '700' : 'normal'};">
+            <td style="padding: 5px 6px; border-right: 1px solid #000000; font-weight: ${isSpecial || isNihil ? '800' : 'normal'}; text-align: ${isNihil ? 'center' : 'left'}; letter-spacing: ${isNihil ? '1px' : 'normal'};">
               ${r.uraian}
             </td>
             <td style="padding: 5px 6px; text-align: right; font-family: monospace; border-right: 1px solid #000000; font-weight: ${isSpecial && r.debit > 0 ? '700' : 'normal'}; color: ${r.debit > 0 ? cDebet : '#000000'};">
-              ${r.debit > 0 ? r.debit.toLocaleString('id-ID') : ''}
+              ${r.debit > 0 ? r.debit.toLocaleString('id-ID') : '-'}
             </td>
             <td style="padding: 5px 6px; text-align: right; font-family: monospace; border-right: 1px solid #000000; color: ${r.kredit > 0 ? cKredit : '#000000'};">
-              ${r.kredit > 0 ? r.kredit.toLocaleString('id-ID') : ''}
+              ${r.kredit > 0 ? r.kredit.toLocaleString('id-ID') : '-'}
             </td>
             <td style="padding: 5px 6px; text-align: right; font-family: monospace; font-weight: 700; color: ${cSaldo};">
               ${r.saldo.toLocaleString('id-ID')}
@@ -766,7 +767,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 <html lang="id">
 <head>
   <meta charset="utf-8" />
-  <title>Buku Kas Pembantu ATK Perkara (Format Standar BKU) - ${namaPengadilan}</title>
+  <title>Buku Bantu Biaya Proses / ATK Perkara - ${namaPengadilan}</title>
   <style>
     @page {
       size: ${paperSizeCss} ${paperOrientation};
@@ -933,11 +934,8 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
   <!-- JUDUL DOKUMEN -->
   <div class="title-box">
-    <div class="title-h2">BUKU KAS PEMBANTU BIAYA PROSES / ATK PERKARA</div>
+    <div class="title-h2">BUKU BANTU BIAYA PROSES / ATK PERKARA</div>
     <div class="title-periode">PERIODE : ${bkuResult.periodeLabel} ${filterPerkaraLabel}</div>
-    <div style="font-size: 9.5px; color: #475569; margin-top: 2px;">
-      Format Standar Buku Kas Umum (BKU) Rekapitulasi Kelompok ATK Perkara
-    </div>
   </div>
 
   <!-- REKAPITULASI PENGELUARAN PER KELOMPOK ATK DENGAN SISA SALDO KAS -->
@@ -1001,7 +999,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
   <!-- TEKS TERBILANG RESMI KEPANITERAAN -->
   <div class="catatan-sisa">
-    Pada hari ini ${kotaTanggal}, Buku Kas Pembantu Biaya Proses / ATK Perkara ditutup dengan sisa saldo kas sebesar 
+    Pada hari ini ${kotaTanggal}, Buku Bantu Biaya Proses / ATK Perkara ditutup dengan sisa saldo kas sebesar 
     <strong>Rp ${bkuResult.saldoAkhir.toLocaleString('id-ID')}</strong> (<em>${terbilang(bkuResult.saldoAkhir)}</em>).
   </div>
 
@@ -1025,7 +1023,15 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     // TEMPLATE BUKU PEMBANTU KAS ATK PERKARA (DEFAULT)
     // -------------------------------------------------------------
     const tableRowsHtml = ledgerWithBalance.length === 0 
-      ? `<tr><td colspan="7" style="padding: 24px; text-align: center; color: #64748b; font-style: italic;">Tidak ada data transaksi ATK pada periode yang dipilih (${periodeTeks}).</td></tr>`
+      ? `<tr style="border-bottom: 1px solid ${borderCol}; page-break-inside: avoid;">
+          <td style="padding: 6px 8px; text-align: center; font-weight: 700; border-right: 1px solid ${borderCol};">1</td>
+          <td style="padding: 6px 8px; text-align: center; font-family: monospace; white-space: nowrap; border-right: 1px solid ${borderCol};">-</td>
+          <td style="padding: 6px 8px; text-align: center; font-family: monospace; border-right: 1px solid ${borderCol};">-</td>
+          <td style="padding: 6px 8px; border-right: 1px solid ${borderCol}; text-align: center; font-weight: 800; letter-spacing: 1px;">NIHIL</td>
+          <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 700; color: ${cDebet}; border-right: 1px solid ${borderCol};">-</td>
+          <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 700; color: ${cKredit}; border-right: 1px solid ${borderCol};">-</td>
+          <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-weight: 800; color: ${cSaldo};">${formatRp(0)}</td>
+        </tr>`
       : ledgerWithBalance.map(r => `
           <tr style="border-bottom: 1px solid ${borderCol}; page-break-inside: avoid;">
             <td style="padding: 6px 8px; text-align: center; font-weight: 700; border-right: 1px solid ${borderCol};">${r.no}</td>
@@ -1521,7 +1527,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     <DialogTitle as="h3" className="font-extrabold text-base flex items-center space-x-2">
                       <span>
                         {reportType === 'buku-kas-bku'
-                          ? 'Cetak Buku Kas ATK (Format Standar BKU)'
+                          ? 'Cetak Buku Bantu Biaya Proses / ATK Perkara'
                           : reportType === 'rekap-persediaan'
                             ? 'Rekapitulasi Pemakaian & Persediaan Barang ATK'
                             : 'Cetak Buku Kas ATK Rinci Per Transaksi'}
@@ -1532,7 +1538,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     </DialogTitle>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       {reportType === 'buku-kas-bku'
-                        ? 'Format Standar BKU: Rekapitulasi Kelompok ATK (No, Tanggal, Uraian, Debit, Kredit, Saldo)'
+                        ? 'Format Buku Bantu: Rekapitulasi Kelompok ATK (No, Tanggal, Uraian, Debit, Kredit, Saldo)'
                         : 'Format Cetak Standar Pengadilan Agama • Mendukung Warna Sistem Penuh & Multi-Halaman Bersih'}
                     </p>
                   </div>
@@ -1540,7 +1546,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
                 {/* Right Action Buttons */}
                 <div className="flex items-center space-x-2">
-                  {/* Selector Jenis Laporan: Buku Kas BKU vs Buku Kas Rinci vs Rekap Persediaan */}
+                  {/* Selector Jenis Laporan: Buku Bantu vs Buku Kas Rinci vs Rekap Persediaan */}
                   <div className="flex items-center bg-purple-100 dark:bg-purple-950 p-1 rounded-xl border border-purple-300 dark:border-purple-800">
                     <button
                       id="tab-modal-buku-kas-bku"
@@ -1550,10 +1556,10 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                           ? 'bg-purple-600 text-white shadow-xs'
                           : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
                       }`}
-                      title="Format Standar BKU dengan Kolom: No, Tanggal, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK"
+                      title="Format Buku Bantu dengan Kolom: No, Tanggal, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK"
                     >
                       <BookOpen className="w-3.5 h-3.5" />
-                      <span>Buku Kas (Format BKU)</span>
+                      <span>Buku Bantu Biaya Proses</span>
                     </button>
                     <button
                       id="tab-modal-buku-kas-rinci"
@@ -1986,17 +1992,17 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     </div>
 
                     <div className="p-2.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1">
-                      <span className="font-bold text-slate-700 dark:text-slate-300 block">Dibuat Oleh: Kasir / Persediaan</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300 block">Dibuat Oleh: Petugas Biaya Proses</span>
                       <input
                         type="text"
-                        placeholder="Nama Kasir"
+                        placeholder="Nama Petugas Biaya Proses"
                         value={kasirNama}
                         onChange={(e) => setKasirNama(e.target.value)}
                         className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 text-xs font-semibold"
                       />
                       <input
                         type="text"
-                        placeholder="NIP Kasir"
+                        placeholder="NIP Petugas Biaya Proses"
                         value={kasirNip}
                         onChange={(e) => setKasirNip(e.target.value)}
                         className="w-full px-2 py-1 rounded border border-slate-300 dark:border-slate-700 text-xs"
@@ -2195,7 +2201,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                   </>
                 ) : reportType === 'buku-kas-bku' ? (
                   <>
-                    {/* JUDUL LAPORAN RESMI BUKU KAS BKU */}
+                    {/* JUDUL LAPORAN RESMI BUKU BANTU BIAYA PROSES */}
                     <div className="text-center space-y-1 pt-1">
                       {!showKop && (
                         <p className="text-xs font-bold tracking-wider uppercase text-slate-700 mb-0.5">
@@ -2203,15 +2209,12 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                         </p>
                       )}
                       <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
-                        BUKU KAS PEMBANTU BIAYA PROSES / ATK PERKARA
+                        BUKU BANTU BIAYA PROSES / ATK PERKARA
                       </h3>
                       <p className={`text-xs font-bold uppercase font-mono ${
                         printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
                       }`}>
                         PERIODE : {bkuResult.periodeLabel} {filterPerkaraLabel}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        Format Standar Buku Kas Umum (BKU) Rekapitulasi Kelompok ATK Perkara Sesuai Administrasi Kepaniteraan MA-RI
                       </p>
                     </div>
 
@@ -2330,15 +2333,16 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                         <tbody className="divide-y divide-slate-300">
                           {bkuResult.rows.map((row) => {
                             const isSpecial = row.tipe === 'saldo-awal' || row.tipe === 'sisa-saldo';
+                            const isNihil = row.uraian === 'NIHIL';
                             return (
-                              <tr key={row.id} className={isSpecial ? 'bg-slate-100 font-semibold' : 'hover:bg-slate-50'}>
+                              <tr key={row.id} className={isSpecial ? 'bg-slate-100 font-semibold' : isNihil ? 'bg-slate-50/70' : 'hover:bg-slate-50'}>
                                 <td className="p-1.5 border-r border-slate-300 text-center font-bold text-slate-700">
                                   {row.no}
                                 </td>
                                 <td className="p-1.5 border-r border-slate-300 whitespace-nowrap text-center text-slate-700 text-[10px]">
-                                  {row.tanggal}
+                                  {isNihil ? '-' : row.tanggal}
                                 </td>
-                                <td className={`p-1.5 border-r border-slate-300 ${isSpecial ? 'font-black text-slate-900' : 'text-slate-800'}`}>
+                                <td className={`p-1.5 border-r border-slate-300 ${isSpecial ? 'font-black text-slate-900' : isNihil ? 'text-center font-black tracking-wider text-slate-800' : 'text-slate-800'}`}>
                                   {row.uraian}
                                 </td>
                                 <td className={`p-1.5 border-r border-slate-300 text-right font-mono font-bold ${
@@ -2387,7 +2391,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
                     {/* CATATAN TEKS TERBILANG */}
                     <div className="p-2.5 bg-slate-50 border border-slate-300 rounded text-xs text-slate-700 italic">
-                      Pada hari ini {kotaTanggal}, Buku Kas Pembantu Biaya Proses / ATK Perkara ditutup dengan sisa saldo kas sebesar{' '}
+                      Pada hari ini {kotaTanggal}, Buku Bantu Biaya Proses / ATK Perkara ditutup dengan sisa saldo kas sebesar{' '}
                       <strong>Rp {bkuResult.saldoAkhir.toLocaleString('id-ID')}</strong> ({terbilang(bkuResult.saldoAkhir)}).
                     </div>
                   </>
@@ -2512,9 +2516,13 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                         <tbody className="divide-y divide-slate-200">
                           {ledgerWithBalance.length === 0 ? (
                             <tr>
-                              <td colSpan={7} className="p-6 text-center text-slate-400 italic">
-                                Tidak ada data transaksi ATK pada periode yang dipilih ({periodeTeks}).
-                              </td>
+                              <td className="p-1.5 border-r border-slate-200 text-center font-bold text-slate-700">1</td>
+                              <td className="p-1.5 border-r border-slate-200 font-mono whitespace-nowrap text-center text-slate-500">-</td>
+                              <td className="p-1.5 border-r border-slate-200 font-mono font-bold whitespace-nowrap text-center text-slate-500">-</td>
+                              <td className="p-1.5 border-r border-slate-200 text-center font-black tracking-wider text-slate-700">NIHIL</td>
+                              <td className="p-1.5 border-r border-slate-200 text-right font-mono text-slate-400">-</td>
+                              <td className="p-1.5 border-r border-slate-200 text-right font-mono text-slate-400">-</td>
+                              <td className="p-1.5 text-right font-mono font-black text-slate-900">{formatRp(0)}</td>
                             </tr>
                           ) : (
                             ledgerWithBalance.map((row) => (
@@ -2621,7 +2629,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                       <div className="space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Dibuat Oleh,</p>
-                          <p className="font-black text-slate-900">Kasir / Pengelola Persediaan ATK</p>
+                          <p className="font-black text-slate-900">Petugas Biaya Proses</p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="font-black text-slate-900 underline underline-offset-2">
@@ -2652,7 +2660,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                       <div className="space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Dibuat Oleh,</p>
-                          <p className="font-black text-slate-900">Kasir / Pengelola Persediaan ATK</p>
+                          <p className="font-black text-slate-900">Petugas Biaya Proses</p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="font-black text-slate-900 underline underline-offset-2">
@@ -2669,7 +2677,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                       <div className="w-72 space-y-16">
                         <div>
                           <p className="font-semibold text-slate-700">Dibuat Oleh,</p>
-                          <p className="font-black text-slate-900">Kasir / Pengelola Persediaan ATK</p>
+                          <p className="font-black text-slate-900">Petugas Biaya Proses</p>
                         </div>
                         <div className="space-y-0.5">
                           <p className="font-black text-slate-900 underline underline-offset-2">

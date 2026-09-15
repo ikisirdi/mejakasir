@@ -679,24 +679,41 @@ export function calculateBkuAtkLedger(
   });
 
   // Baris-baris Transaksi
-  intermediateEntries.forEach((entry, idx) => {
-    runningBalance = runningBalance + entry.debit - entry.kredit;
+  if (intermediateEntries.length === 0) {
     rows.push({
-      id: `bku-row-${idx + 1}`,
+      id: 'bku-row-nihil',
       no: rowNumber++,
-      tanggal: entry.tanggal,
-      rawDate: entry.rawDate,
-      nomorBk: entry.nomorBk,
-      kodeReferensi: entry.kodeReferensi,
-      uraian: entry.uraian,
-      debit: entry.debit,
-      kredit: entry.kredit,
+      tanggal: '-',
+      rawDate: startDateStr || '2026-01-01',
+      nomorBk: '',
+      kodeReferensi: '',
+      uraian: 'NIHIL',
+      debit: 0,
+      kredit: 0,
       saldo: runningBalance,
-      tipe: entry.tipe,
-      kelompok: entry.kelompok,
-      nomorPerkara: entry.nomorPerkara
+      tipe: 'pengeluaran',
+      isBold: true
     });
-  });
+  } else {
+    intermediateEntries.forEach((entry, idx) => {
+      runningBalance = runningBalance + entry.debit - entry.kredit;
+      rows.push({
+        id: `bku-row-${idx + 1}`,
+        no: rowNumber++,
+        tanggal: entry.tanggal,
+        rawDate: entry.rawDate,
+        nomorBk: entry.nomorBk,
+        kodeReferensi: entry.kodeReferensi,
+        uraian: entry.uraian,
+        debit: entry.debit,
+        kredit: entry.kredit,
+        saldo: runningBalance,
+        tipe: entry.tipe,
+        kelompok: entry.kelompok,
+        nomorPerkara: entry.nomorPerkara
+      });
+    });
+  }
 
   // Tanggal untuk Baris Sisa Saldo (akhir periode atau tanggal transaksi terakhir)
   const lastRawDate = intermediateEntries.length > 0 
