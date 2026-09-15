@@ -93,6 +93,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   const [paperOrientation, setPaperOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [paperSize, setPaperSize] = useState<'a4' | 'f4' | 'legal'>('a4');
   const [ttdLayout, setTtdLayout] = useState<'3_kolom' | '2_kolom' | '1_kolom'>('3_kolom');
+  const [showKop, setShowKop] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
 
   // Official Court Metadata
@@ -608,6 +609,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   </style>
 </head>
 <body>
+  ${showKop ? `
   <!-- KOP SURAT MAHKAMAH AGUNG -->
   <div class="kop-container">
     <div class="kop-logo">⚖️</div>
@@ -617,6 +619,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     <div class="kop-pengadilan">${namaPengadilan}</div>
     <div class="kop-alamat">${alamatPengadilan}</div>
   </div>
+  ` : `
+  <div style="text-align: center; margin-bottom: 8px;">
+    <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #334155;">${namaPengadilan}</div>
+  </div>
+  `}
 
   <!-- JUDUL LAPORAN PERSEDIAAN -->
   <div class="title-box">
@@ -910,6 +917,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   </style>
 </head>
 <body>
+  ${showKop ? `
   <!-- KOP SURAT RESMI -->
   <div class="kop-container">
     <div class="kop-logo">⚖️</div>
@@ -917,6 +925,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     <div class="kop-pengadilan">${namaPengadilan}</div>
     <div class="kop-alamat">${alamatPengadilan}</div>
   </div>
+  ` : `
+  <div style="text-align: center; margin-bottom: 8px;">
+    <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #334155;">${namaPengadilan}</div>
+  </div>
+  `}
 
   <!-- JUDUL DOKUMEN -->
   <div class="title-box">
@@ -1211,6 +1224,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   </style>
 </head>
 <body>
+  ${showKop ? `
   <!-- KOP SURAT MAHKAMAH AGUNG -->
   <div class="kop-container">
     <div class="kop-logo">⚖️</div>
@@ -1220,6 +1234,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     <div class="kop-pengadilan">${namaPengadilan}</div>
     <div class="kop-alamat">${alamatPengadilan}</div>
   </div>
+  ` : `
+  <div style="text-align: center; margin-bottom: 8px;">
+    <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: #334155;">${namaPengadilan}</div>
+  </div>
+  `}
 
   <!-- JUDUL DOKUMEN -->
   <div class="title-box">
@@ -1573,7 +1592,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     }`}
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5" />
-                    <span>Opsi Kop & TTD</span>
+                    <span>Opsi & TTD</span>
                   </button>
 
                   <button
@@ -1859,23 +1878,36 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                 <div className={`p-4 border-b text-xs space-y-3 shrink-0 print:hidden animate-fade-in ${
                   isLight ? 'bg-purple-50/60 border-purple-200' : 'bg-purple-950/30 border-purple-800/50'
                 }`}>
-                  <div className="flex items-center justify-between font-bold text-slate-800 dark:text-slate-200 pb-1 border-b border-purple-200/50">
+                  <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-slate-800 dark:text-slate-200 pb-1 border-b border-purple-200/50">
                     <span className="flex items-center space-x-1.5">
                       <Building2 className="w-4 h-4 text-purple-600" />
-                      <span>Kustomisasi Identitas Kop Surat & Pejabat Penandatangan</span>
+                      <span>Kustomisasi Identitas Lembaga & Pejabat Penandatangan</span>
                     </span>
                     
-                    <div className="flex items-center space-x-2">
-                      <span className="text-slate-500 font-normal">Format TTD:</span>
-                      <select
-                        value={ttdLayout}
-                        onChange={(e) => setTtdLayout(e.target.value as any)}
-                        className="px-2 py-1 rounded border border-purple-300 bg-white dark:bg-slate-800 font-bold"
-                      >
-                        <option value="3_kolom">3 Kolom (Ketua, Panitera, Kasir)</option>
-                        <option value="2_kolom">2 Kolom (Panitera & Kasir)</option>
-                        <option value="1_kolom">1 Kolom (Kasir / Petugas Saja)</option>
-                      </select>
+                    <div className="flex items-center space-x-4">
+                      <label className="flex items-center space-x-1.5 cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          id="toggle-show-kop-checkbox"
+                          checked={showKop}
+                          onChange={(e) => setShowKop(e.target.checked)}
+                          className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 border-slate-300 dark:border-slate-600"
+                        />
+                        <span>Sertakan Kop Surat</span>
+                      </label>
+
+                      <div className="flex items-center space-x-2">
+                        <span className="text-slate-500 font-normal">Format TTD:</span>
+                        <select
+                          value={ttdLayout}
+                          onChange={(e) => setTtdLayout(e.target.value as any)}
+                          className="px-2 py-1 rounded border border-purple-300 bg-white dark:bg-slate-800 font-bold"
+                        >
+                          <option value="3_kolom">3 Kolom (Ketua, Panitera, Kasir)</option>
+                          <option value="2_kolom">2 Kolom (Panitera & Kasir)</option>
+                          <option value="1_kolom">1 Kolom (Kasir / Petugas Saja)</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
 
@@ -1985,29 +2017,31 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                 }`}
               >
                 
-                {/* KOP SURAT RESMI PENGADILAN AGAMA */}
-                <div className="text-center space-y-0.5 border-b-[3px] border-double border-slate-900 pb-3">
-                  <div className="flex items-center justify-center space-x-3 mb-1">
-                    <div className="w-10 h-10 rounded-full border-2 border-slate-900 flex items-center justify-center font-serif font-black text-lg">
-                      ⚖️
+                {/* KOP SURAT RESMI PENGADILAN AGAMA (DEFAULT: HILANG / TIDAK DITAMPILKAN) */}
+                {showKop && (
+                  <div className="text-center space-y-0.5 border-b-[3px] border-double border-slate-900 pb-3">
+                    <div className="flex items-center justify-center space-x-3 mb-1">
+                      <div className="w-10 h-10 rounded-full border-2 border-slate-900 flex items-center justify-center font-serif font-black text-lg">
+                        ⚖️
+                      </div>
                     </div>
+                    <h4 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-800 font-serif">
+                      MAHKAMAH AGUNG REPUBLIK INDONESIA
+                    </h4>
+                    <h4 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-800 font-serif">
+                      DIREKTORAT JENDERAL BADAN PERADILAN AGAMA
+                    </h4>
+                    <h4 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-800 font-serif">
+                      {instansiTinggi}
+                    </h4>
+                    <h2 className="text-base sm:text-lg font-black tracking-wide uppercase text-slate-950 font-serif">
+                      {namaPengadilan}
+                    </h2>
+                    <p className="text-[10px] sm:text-[11px] text-slate-600 font-sans">
+                      {alamatPengadilan}
+                    </p>
                   </div>
-                  <h4 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-800 font-serif">
-                    MAHKAMAH AGUNG REPUBLIK INDONESIA
-                  </h4>
-                  <h4 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-800 font-serif">
-                    DIREKTORAT JENDERAL BADAN PERADILAN AGAMA
-                  </h4>
-                  <h4 className="text-xs sm:text-sm font-bold tracking-wider uppercase text-slate-800 font-serif">
-                    {instansiTinggi}
-                  </h4>
-                  <h2 className="text-base sm:text-lg font-black tracking-wide uppercase text-slate-950 font-serif">
-                    {namaPengadilan}
-                  </h2>
-                  <p className="text-[10px] sm:text-[11px] text-slate-600 font-sans">
-                    {alamatPengadilan}
-                  </p>
-                </div>
+                )}
 
                 {/* -------------------------------------------------------------
                     KONTEN LAPORAN PERSDIAAN ATAU BUKU KAS
@@ -2016,6 +2050,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                   <>
                     {/* JUDUL LAPORAN REKAP PERSEDIAAN */}
                     <div className="text-center space-y-1 pt-1">
+                      {!showKop && (
+                        <p className="text-xs font-bold tracking-wider uppercase text-slate-700 mb-0.5">
+                          {namaPengadilan}
+                        </p>
+                      )}
                       <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
                         REKAPITULASI PEMAKAIAN & PERSEDIAAN BARANG ATK PERKARA
                       </h3>
@@ -2158,6 +2197,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                   <>
                     {/* JUDUL LAPORAN RESMI BUKU KAS BKU */}
                     <div className="text-center space-y-1 pt-1">
+                      {!showKop && (
+                        <p className="text-xs font-bold tracking-wider uppercase text-slate-700 mb-0.5">
+                          {namaPengadilan}
+                        </p>
+                      )}
                       <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
                         BUKU KAS PEMBANTU BIAYA PROSES / ATK PERKARA
                       </h3>
@@ -2351,6 +2395,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                   <>
                     {/* JUDUL LAPORAN RESMI BUKU KAS */}
                     <div className="text-center space-y-1 pt-1">
+                      {!showKop && (
+                        <p className="text-xs font-bold tracking-wider uppercase text-slate-700 mb-0.5">
+                          {namaPengadilan}
+                        </p>
+                      )}
                       <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
                         BUKU PEMBANTU BIAYA PROSES / ATK PERKARA
                       </h3>
