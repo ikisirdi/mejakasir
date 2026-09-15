@@ -3,7 +3,7 @@ import {
   Sparkles, Plus, Trash2, Edit3, Search, Filter, 
   Download, Printer, RefreshCw, FileText, CheckCircle2, 
   AlertTriangle, Eye, Code, Copy, Check, X, Calendar, ArrowUpDown, CloudUpload,
-  Boxes, PackageCheck, Layers, PieChart, Info
+  Boxes, PackageCheck, Layers, PieChart, Info, BookOpen
 } from 'lucide-react';
 import { CaseRecord, SimulasiAtkRecord, JurnalBiayaSkumRecord } from '../types';
 import { 
@@ -58,7 +58,7 @@ export const BukuBantuAtk: React.FC<BukuBantuAtkProps> = ({
 
   // Print Report modal state
   const [showPrintReportModal, setShowPrintReportModal] = useState<boolean>(false);
-  const [reportModalType, setReportModalType] = useState<'buku-kas' | 'rekap-persediaan'>('buku-kas');
+  const [reportModalType, setReportModalType] = useState<'buku-kas' | 'rekap-persediaan' | 'buku-kas-bku'>('buku-kas-bku');
   const [reportModalFilterCase, setReportModalFilterCase] = useState<string>('all');
 
   // Filter state
@@ -710,6 +710,24 @@ if (sheetSimAtk) {
           {/* Top Quick Actions */}
           <div className="flex flex-wrap items-center gap-2">
             <button
+              id="btn-cetak-buku-kas-bku"
+              onClick={() => {
+                setReportModalType('buku-kas-bku');
+                if (onOpenReportModal) {
+                  onOpenReportModal();
+                } else {
+                  setShowPrintReportModal(true);
+                }
+              }}
+              className="px-3.5 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-600/30 flex items-center space-x-1.5 transition-all transform active:scale-95"
+              title="Cetak Buku Kas Format Standar BKU (Kolom No, Tanggal, No B/K, Kode Ref, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK)"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>Cetak Buku Kas (Format BKU)</span>
+            </button>
+
+            <button
+              id="btn-cetak-kas-rinci"
               onClick={() => {
                 setReportModalType('buku-kas');
                 if (onOpenReportModal) {
@@ -718,14 +736,19 @@ if (sheetSimAtk) {
                   setShowPrintReportModal(true);
                 }
               }}
-              className="px-3.5 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-600/30 flex items-center space-x-1.5 transition-all transform active:scale-95"
-              title="Cetak Laporan Resmi Buku Pembantu ATK (Perbulan / Pertahun) - Format Resmi Pengadilan Agama"
+              className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center space-x-1.5 transition-all ${
+                isLight 
+                  ? 'bg-white text-purple-700 border-purple-300 hover:bg-purple-50 shadow-xs' 
+                  : 'bg-purple-950/50 text-purple-300 border-purple-800 hover:bg-purple-900/50'
+              }`}
+              title="Cetak Laporan Rinci Transaksi Kas ATK Perkara"
             >
-              <Printer className="w-4 h-4" />
-              <span>Cetak Buku Kas ATK</span>
+              <FileText className="w-4 h-4" />
+              <span>Kas Rinci</span>
             </button>
 
             <button
+              id="btn-cetak-rekap-persediaan"
               onClick={() => {
                 setReportModalType('rekap-persediaan');
                 setReportModalFilterCase(inventoryCaseFilter);

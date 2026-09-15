@@ -21,6 +21,13 @@ import {
   exportAtkInventoryToCsv, 
   AtkInventorySummary 
 } from '../utils/atkInventoryCalculation';
+import {
+  calculateBkuAtkLedger,
+  BkuCalculationResult,
+  BkuLedgerRow,
+  formatTanggalIndo
+} from '../utils/bkuAtkCalculation';
+import { terbilang } from '../utils/terbilang';
 
 interface LaporanResmiAtkModalProps {
   isOpen: boolean;
@@ -31,7 +38,7 @@ interface LaporanResmiAtkModalProps {
   theme?: 'light' | 'dark';
   initialMonth?: string; // '01' - '12' or 'all'
   initialYear?: string;  // '2026', '2025', etc. or 'all'
-  initialReportType?: 'buku-kas' | 'rekap-persediaan';
+  initialReportType?: 'buku-kas-bku' | 'buku-kas' | 'rekap-persediaan';
   initialFilterPerkara?: string;
 }
 
@@ -59,14 +66,14 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   theme = 'light',
   initialMonth = 'all',
   initialYear = '2026',
-  initialReportType = 'buku-kas',
+  initialReportType = 'buku-kas-bku',
   initialFilterPerkara = 'all'
 }) => {
   const isLight = theme === 'light';
   const printContentRef = useRef<HTMLDivElement>(null);
 
-  // Report Type State: 'buku-kas' (Buku Kas ATK) vs 'rekap-persediaan' (Rekapitulasi Persediaan Barang Digunakan)
-  const [reportType, setReportType] = useState<'buku-kas' | 'rekap-persediaan'>(initialReportType);
+  // Report Type State: 'buku-kas-bku' (Format Standar BKU Rekapitulasi) vs 'buku-kas' (Kas Rinci) vs 'rekap-persediaan'
+  const [reportType, setReportType] = useState<'buku-kas-bku' | 'buku-kas' | 'rekap-persediaan'>(initialReportType);
 
   // Filter States
   const [selectedMonth, setSelectedMonth] = useState<string>(initialMonth);
@@ -294,6 +301,11 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
     return summary;
   }, [filteredLedger]);
+
+  // 6. Kalkulasi Buku Kas Format Standar BKU (Rekapitulasi Kelompok ATK & Sisa Saldo Sesuai Format Mahkamah Agung)
+  const bkuResult: BkuCalculationResult = useMemo(() => {
+    return calculateBkuAtkLedger(cases, simulasiAtkRecords, selectedMonth, selectedYear, filterNomorPerkara);
+  }, [cases, simulasiAtkRecords, selectedMonth, selectedYear, filterNomorPerkara]);
 
   const periodeTeks = selectedMonth !== 'all' 
     ? `BULAN ${MONTH_LABELS[selectedMonth]?.toUpperCase() || selectedMonth} ${selectedYear !== 'all' ? selectedYear : ''}` 
@@ -660,6 +672,319 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
   <!-- CATATAN KAKI DOKUMEN -->
   <div class="footer-doc">
     <span>Dokumen ini dicetak otomatis melalui Aplikasi SI-PERKARA PA Paniai • Modul Rekapitulasi Persediaan Barang ATK</span>
+    <span>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</span>
+  </div>
+</body>
+</html>`;
+    }
+
+    // -------------------------------------------------------------
+    // TEMPLATE BUKU KAS ATK FORMAT STANDAR BKU (SESUAI GAMBAR RESMI PENGADILAN)
+    // Kolom: No, Tanggal, Nomor B/K, Kode Referensi, Uraian, Debit, Kredit, Saldo
+    // Sub-header penomoran: 1, 2, 3, 4, 5, 6, 7, 8
+    // Baris Saldo Awal, Pengeluaran Rekapitulasi Kelompok ATK, Penerimaan, Sisa Saldo, dan Jumlah
+    // -------------------------------------------------------------
+    if (reportType === 'buku-kas-bku') {
+      const bkuTableRowsHtml = bkuResult.rows.map(r => {
+        const isSaldoAwal = r.tipe === 'saldo-awal';
+        const isSisaSaldo = r.tipe === 'sisa-saldo';
+        const isSpecial = isSaldoAwal || isSisaSaldo;
+        const bgRow = isSpecial 
+          ? (isColor ? '#f8fafc' : '#ffffff') 
+          : '#ffffff';
+
+        return `
+          <tr style="border-bottom: 1px solid #000000; page-break-inside: avoid; background-color: ${bgRow};">
+            <td style="padding: 5px 6px; text-align: center; font-weight: ${isSpecial ? '700' : 'normal'}; border-right: 1px solid #000000;">
+              ${r.no}
+            </td>
+            <td style="padding: 5px 6px; text-align: center; white-space: nowrap; border-right: 1px solid #000000;">
+              ${r.tanggal}
+            </td>
+            <td style="padding: 5px 6px; text-align: center; font-family: monospace; border-right: 1px solid #000000;">
+              ${r.nomorBk || ''}
+            </td>
+            <td style="padding: 5px 6px; text-align: center; font-family: monospace; border-right: 1px solid #000000;">
+              ${r.kodeReferensi || ''}
+            </td>
+            <td style="padding: 5px 6px; border-right: 1px solid #000000; font-weight: ${isSpecial ? '700' : 'normal'};">
+              ${r.uraian}
+            </td>
+            <td style="padding: 5px 6px; text-align: right; font-family: monospace; border-right: 1px solid #000000; font-weight: ${isSpecial && r.debit > 0 ? '700' : 'normal'}; color: ${r.debit > 0 ? cDebet : '#000000'};">
+              ${r.debit > 0 ? r.debit.toLocaleString('id-ID') : ''}
+            </td>
+            <td style="padding: 5px 6px; text-align: right; font-family: monospace; border-right: 1px solid #000000; color: ${r.kredit > 0 ? cKredit : '#000000'};">
+              ${r.kredit > 0 ? r.kredit.toLocaleString('id-ID') : ''}
+            </td>
+            <td style="padding: 5px 6px; text-align: right; font-family: monospace; font-weight: 700; color: ${cSaldo};">
+              ${r.saldo.toLocaleString('id-ID')}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      // Rekapitulasi per kelompok ATK (summary box)
+      const rekapKelompokItemsHtml = Object.entries(bkuResult.rekapKelompok).map(([kelompok, data]) => `
+        <div style="flex: 1; min-width: 95px; text-align: center; padding: 5px 4px; border-right: 1px solid #000000;">
+          <div style="font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #1e293b;">${kelompok}</div>
+          <div style="font-family: monospace; font-weight: 800; font-size: 10px; margin-top: 2px; color: ${isColor ? '#b91c1c' : '#000000'};">
+            Rp ${data.total.toLocaleString('id-ID')}
+          </div>
+          <div style="font-size: 8px; color: #475569;">${data.count} transaksi</div>
+        </div>
+      `).join('');
+
+      return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Buku Kas Pembantu ATK Perkara (Format Standar BKU) - ${namaPengadilan}</title>
+  <style>
+    @page {
+      size: ${paperSizeCss} ${paperOrientation};
+      margin: 12mm 15mm 12mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    body {
+      font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+      font-size: 10.5px;
+      line-height: 1.35;
+      color: #000000;
+      background: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+    .kop-container {
+      text-align: center;
+      border-bottom: 3px double #000000;
+      padding-bottom: 6px;
+      margin-bottom: 12px;
+    }
+    .kop-logo {
+      font-size: 24px;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .kop-h1 {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin: 1px 0;
+    }
+    .kop-pengadilan {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin: 2px 0;
+    }
+    .kop-alamat {
+      font-size: 9.5px;
+      color: #334155;
+      margin: 2px 0 0 0;
+    }
+    .title-box {
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .title-h2 {
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      text-decoration: underline;
+      margin: 0 0 4px 0;
+    }
+    .title-periode {
+      font-size: 11px;
+      font-weight: 700;
+      font-family: monospace;
+      color: ${isColor ? '#6d28d9' : '#000000'};
+      margin: 0;
+    }
+    table.bku-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1.5px solid #000000;
+      font-size: 10px;
+      margin-bottom: 12px;
+    }
+    table.bku-table thead {
+      display: table-header-group;
+    }
+    table.bku-table tr {
+      page-break-inside: avoid;
+    }
+    table.bku-table th {
+      border: 1px solid #000000;
+      padding: 6px 4px;
+      text-align: center;
+      font-weight: 700;
+      background: ${bgTableHead};
+      color: #000000;
+    }
+    table.bku-table tr.sub-head th {
+      padding: 2px 4px;
+      font-size: 9px;
+      font-weight: normal;
+      background: ${isColor ? '#f8fafc' : '#ffffff'};
+    }
+    table.bku-table td {
+      border: 1px solid #000000;
+      padding: 5px 6px;
+      vertical-align: top;
+      color: #000000;
+    }
+    table.bku-table tfoot td {
+      border: 1.5px solid #000000;
+      padding: 6px;
+      background: ${bgTableHead};
+      font-weight: 700;
+    }
+    .rekap-box {
+      border: 1px solid #000000;
+      margin-bottom: 12px;
+      page-break-inside: avoid;
+    }
+    .rekap-header {
+      background: ${bgTableHead};
+      padding: 4px 8px;
+      font-weight: 700;
+      font-size: 10px;
+      border-bottom: 1px solid #000000;
+      display: flex;
+      justify-content: space-between;
+    }
+    .rekap-body {
+      display: flex;
+      flex-wrap: wrap;
+    }
+    .catatan-sisa {
+      margin-top: 8px;
+      font-size: 10px;
+      font-style: italic;
+      color: #1e293b;
+      line-height: 1.4;
+      page-break-inside: avoid;
+    }
+    .footer-doc {
+      margin-top: 20px;
+      padding-top: 6px;
+      border-top: 1px solid #000000;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.5px;
+      color: #64748b;
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <!-- KOP SURAT RESMI -->
+  <div class="kop-container">
+    <div class="kop-logo">⚖️</div>
+    <div class="kop-h1">${instansiTinggi}</div>
+    <div class="kop-pengadilan">${namaPengadilan}</div>
+    <div class="kop-alamat">${alamatPengadilan}</div>
+  </div>
+
+  <!-- JUDUL DOKUMEN -->
+  <div class="title-box">
+    <div class="title-h2">BUKU KAS PEMBANTU BIAYA PROSES / ATK PERKARA</div>
+    <div class="title-periode">PERIODE : ${bkuResult.periodeLabel} ${filterPerkaraLabel}</div>
+    <div style="font-size: 9.5px; color: #475569; margin-top: 2px;">
+      Format Standar Buku Kas Umum (BKU) Rekapitulasi Kelompok ATK Perkara
+    </div>
+  </div>
+
+  <!-- REKAPITULASI PENGELUARAN PER KELOMPOK ATK DENGAN SISA SALDO KAS -->
+  <div class="rekap-box">
+    <div class="rekap-header">
+      <span>REKAPITULASI PENGELUARAN PER KELOMPOK ATK & SISA SALDO KAS</span>
+      <span>SISA SALDO KAS: Rp ${bkuResult.saldoAkhir.toLocaleString('id-ID')}</span>
+    </div>
+    <div class="rekap-body">
+      ${rekapKelompokItemsHtml}
+      <div style="flex: 1.2; min-width: 120px; text-align: center; padding: 5px 4px; background-color: ${isColor ? '#f5f3ff' : '#ffffff'};">
+        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: ${isColor ? '#6d28d9' : '#000000'};">SISA SALDO KAS ATK</div>
+        <div style="font-family: monospace; font-weight: 900; font-size: 11px; margin-top: 2px; color: ${isColor ? '#6d28d9' : '#000000'};">
+          Rp ${bkuResult.saldoAkhir.toLocaleString('id-ID')}
+        </div>
+        <div style="font-size: 8px; color: #475569;">Saldo Kas Berjalan</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABEL STANDAR BKU RESMI SESUAI CONTOH GAMBAR (NO, TANGGAL, NO B/K, KODE REF, URAIAN, DEBIT, KREDIT, SALDO) -->
+  <table class="bku-table">
+    <thead>
+      <tr>
+        <th style="width: 38px;">No</th>
+        <th style="width: 105px;">Tanggal</th>
+        <th style="width: 110px;">Nomor B/K</th>
+        <th style="width: 85px;">Kode Referensi</th>
+        <th>Uraian</th>
+        <th style="width: 105px; text-align: right;">Debit</th>
+        <th style="width: 105px; text-align: right;">Kredit</th>
+        <th style="width: 110px; text-align: right;">Saldo</th>
+      </tr>
+      <tr class="sub-head">
+        <th>1</th>
+        <th>2</th>
+        <th>3</th>
+        <th>4</th>
+        <th>5</th>
+        <th>6</th>
+        <th>7</th>
+        <th>8</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${bkuTableRowsHtml}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5" style="text-align: center; font-weight: 800; text-transform: uppercase; border-right: 1px solid #000000;">
+          Jumlah
+        </td>
+        <td style="text-align: right; font-family: monospace; font-weight: 800; border-right: 1px solid #000000; color: ${cDebet};">
+          ${bkuResult.totalPenerimaan.toLocaleString('id-ID')}
+        </td>
+        <td style="text-align: right; font-family: monospace; font-weight: 800; border-right: 1px solid #000000; color: ${cKredit};">
+          ${bkuResult.totalPengeluaran.toLocaleString('id-ID')}
+        </td>
+        <td style="text-align: right; font-family: monospace; font-weight: 800; color: ${cSaldo};">
+          ${bkuResult.saldoAkhir.toLocaleString('id-ID')}
+        </td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- TEKS TERBILANG RESMI KEPANITERAAN -->
+  <div class="catatan-sisa">
+    Pada hari ini ${kotaTanggal}, Buku Kas Pembantu Biaya Proses / ATK Perkara ditutup dengan sisa saldo kas sebesar 
+    <strong>Rp ${bkuResult.saldoAkhir.toLocaleString('id-ID')}</strong> (<em>${terbilang(bkuResult.saldoAkhir)}</em>).
+  </div>
+
+  <!-- LEMBAR PENGESAHAN TANDA TANGAN RESMI -->
+  <div style="page-break-inside: avoid; margin-top: 24px;">
+    <div style="text-align: right; font-weight: 600; margin-bottom: 8px; padding-right: 15px;">
+      ${kotaTanggal}
+    </div>
+    ${signaturesHtml}
+  </div>
+
+  <!-- CATATAN KAKI DOKUMEN -->
+  <div class="footer-doc">
+    <span>Dokumen ini dicetak otomatis melalui Aplikasi SI-PERKARA PA Paniai • Modul Buku Kas Standar BKU ATK</span>
     <span>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</span>
   </div>
 </body>
@@ -1054,6 +1379,40 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+    } else if (reportType === 'buku-kas-bku') {
+      const filename = `Buku_Kas_BKU_ATK_${namaPengadilan.replace(/\s+/g, '_')}_${periodStr}.csv`;
+      const headers = ['No', 'Tanggal', 'Nomor B/K', 'Kode Referensi', 'Uraian', 'Debit', 'Kredit', 'Saldo'];
+      const rows = bkuResult.rows.map(r => [
+        r.no,
+        `"${r.tanggal}"`,
+        `"${r.nomorBk}"`,
+        `"${r.kodeReferensi}"`,
+        `"${r.uraian.replace(/"/g, '""')}"`,
+        r.debit || 0,
+        r.kredit || 0,
+        r.saldo
+      ]);
+      // Tambahkan baris total jumlah
+      rows.push([
+        '',
+        '',
+        '',
+        '',
+        '"JUMLAH"',
+        bkuResult.totalPenerimaan,
+        bkuResult.totalPengeluaran,
+        bkuResult.saldoAkhir
+      ]);
+
+      const csvContent = [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } else {
       const filename = `Laporan_Resmi_ATK_${namaPengadilan.replace(/\s+/g, '_')}_${periodStr}.csv`;
       const headers = ['No', 'Tanggal', 'Nomor Perkara', 'Nama Pihak', 'Uraian ATK / Transaksi', 'Kategori', 'Penerimaan (Debet)', 'Pengeluaran (Kredit)', 'Saldo Berjalan'];
@@ -1118,43 +1477,74 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
               }`}>
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center text-white shadow-md shadow-purple-600/30">
-                    {reportType === 'rekap-persediaan' ? <Boxes className="w-5 h-5" /> : <Printer className="w-5 h-5" />}
+                    {reportType === 'rekap-persediaan' ? (
+                      <Boxes className="w-5 h-5" />
+                    ) : reportType === 'buku-kas-bku' ? (
+                      <BookOpen className="w-5 h-5" />
+                    ) : (
+                      <Printer className="w-5 h-5" />
+                    )}
                   </div>
                   <div>
                     <DialogTitle as="h3" className="font-extrabold text-base flex items-center space-x-2">
-                      <span>{reportType === 'rekap-persediaan' ? 'Rekapitulasi Pemakaian & Persediaan Barang ATK' : 'Cetak Buku Pembantu Kas ATK Perkara'}</span>
+                      <span>
+                        {reportType === 'buku-kas-bku'
+                          ? 'Cetak Buku Kas ATK (Format Standar BKU)'
+                          : reportType === 'rekap-persediaan'
+                            ? 'Rekapitulasi Pemakaian & Persediaan Barang ATK'
+                            : 'Cetak Buku Kas ATK Rinci Per Transaksi'}
+                      </span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-600 text-white font-bold tracking-wide">
                         RESMI MA-RI
                       </span>
                     </DialogTitle>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Format Cetak Standar Pengadilan Agama • Mendukung Warna Sistem Penuh & Multi-Halaman Bersih
+                      {reportType === 'buku-kas-bku'
+                        ? 'Format Standar BKU: Rekapitulasi Kelompok ATK (No, Tanggal, No B/K, Kode Ref, Uraian, Debit, Kredit, Saldo)'
+                        : 'Format Cetak Standar Pengadilan Agama • Mendukung Warna Sistem Penuh & Multi-Halaman Bersih'}
                     </p>
                   </div>
                 </div>
 
                 {/* Right Action Buttons */}
                 <div className="flex items-center space-x-2">
-                  {/* Selector Jenis Laporan: Buku Kas vs Rekap Persediaan */}
+                  {/* Selector Jenis Laporan: Buku Kas BKU vs Buku Kas Rinci vs Rekap Persediaan */}
                   <div className="flex items-center bg-purple-100 dark:bg-purple-950 p-1 rounded-xl border border-purple-300 dark:border-purple-800">
                     <button
+                      id="tab-modal-buku-kas-bku"
+                      onClick={() => setReportType('buku-kas-bku')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                        reportType === 'buku-kas-bku'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
+                      }`}
+                      title="Format Standar BKU dengan Kolom: No, Tanggal, No B/K, Kode Ref, Uraian, Debit, Kredit, Saldo & Rekap Kelompok ATK"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>Buku Kas (Format BKU)</span>
+                    </button>
+                    <button
+                      id="tab-modal-buku-kas-rinci"
                       onClick={() => setReportType('buku-kas')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
                         reportType === 'buku-kas'
                           ? 'bg-purple-600 text-white shadow-xs'
                           : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
                       }`}
+                      title="Format Rinci Per Transaksi Berkas Perkara"
                     >
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>Buku Kas ATK</span>
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Kas Rinci</span>
                     </button>
                     <button
+                      id="tab-modal-rekap-persediaan"
                       onClick={() => setReportType('rekap-persediaan')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
                         reportType === 'rekap-persediaan'
                           ? 'bg-purple-600 text-white shadow-xs'
                           : 'text-purple-800 dark:text-purple-300 hover:bg-purple-200/50'
                       }`}
+                      title="Rekapitulasi Volume & Nilai Pemakaian Barang Persediaan"
                     >
                       <Boxes className="w-3.5 h-3.5" />
                       <span>Rekap Persediaan</span>
@@ -1649,6 +2039,209 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                           </tr>
                         </tfoot>
                       </table>
+                    </div>
+                  </>
+                ) : reportType === 'buku-kas-bku' ? (
+                  <>
+                    {/* JUDUL LAPORAN RESMI BUKU KAS BKU */}
+                    <div className="text-center space-y-1 pt-1">
+                      <h3 className="text-sm sm:text-base font-black tracking-wider uppercase underline underline-offset-4 text-slate-900">
+                        BUKU KAS PEMBANTU BIAYA PROSES / ATK PERKARA
+                      </h3>
+                      <p className={`text-xs font-bold uppercase font-mono ${
+                        printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
+                      }`}>
+                        PERIODE : {bkuResult.periodeLabel} {filterPerkaraLabel}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Format Standar Buku Kas Umum (BKU) Rekapitulasi Kelompok ATK Perkara Sesuai Administrasi Kepaniteraan MA-RI
+                      </p>
+                    </div>
+
+                    {/* RINGKASAN FINANSIAL RESMI (A, B, C, D) */}
+                    <div className={`grid grid-cols-1 md:grid-cols-4 gap-3 border p-3 rounded-lg text-xs ${
+                      printColorMode === 'color' 
+                        ? 'border-purple-200 bg-purple-50/40' 
+                        : 'border-slate-300 bg-slate-50'
+                    }`}>
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          A. Saldo Awal Periode
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-slate-900' : 'text-slate-900'
+                        }`}>
+                          {formatRp(bkuResult.saldoAwal)}
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Kas sisa dari periode lalu
+                        </span>
+                      </div>
+
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          B. Total Debit (Penerimaan)
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                        }`}>
+                          {formatRp(bkuResult.totalPenerimaan)}
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Saldo awal + Panjar perkara masuk
+                        </span>
+                      </div>
+
+                      <div className="border-r-0 md:border-r border-slate-300 pr-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          C. Total Kredit (Pengeluaran)
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
+                        }`}>
+                          {formatRp(bkuResult.totalPengeluaran)}
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Realisasi belanja ATK perkara
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] font-bold uppercase text-slate-500 block">
+                          D. Sisa Saldo Kas ATK
+                        </span>
+                        <strong className={`text-sm font-black font-mono block mt-0.5 ${
+                          printColorMode === 'color' ? 'text-purple-700' : 'text-slate-900'
+                        }`}>
+                          {formatRp(bkuResult.saldoAkhir)}
+                        </strong>
+                        <span className="text-[9px] text-slate-500">
+                          Sisa kas di akhir periode
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* REKAP RINCIAN PENGELUARAN PER KELOMPOK ATK DENGAN SISA SALDO */}
+                    <div className="border border-slate-300 rounded-lg overflow-hidden">
+                      <div className="bg-slate-100 px-3 py-1.5 font-bold text-[11px] border-b border-slate-300 flex justify-between items-center text-slate-800">
+                        <span>REKAPITULASI PENGELUARAN PER KELOMPOK ATK (STANDAR MAHKAMAH AGUNG RI)</span>
+                        <span className="text-[10px] font-mono text-purple-700 font-bold">
+                          SISA SALDO KAS: {formatRp(bkuResult.saldoAkhir)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y divide-slate-200 text-[11px] bg-white">
+                        {Object.entries(bkuResult.rekapKelompok).map(([kelompok, data]) => (
+                          <div key={kelompok} className="p-2 text-center">
+                            <span className="text-[10px] font-bold text-slate-500 block">{kelompok}</span>
+                            <strong className="font-mono font-bold text-rose-700 block text-xs">
+                              {formatRp(data.total)}
+                            </strong>
+                            <span className="text-[9px] text-slate-400">{data.count} transaksi</span>
+                          </div>
+                        ))}
+                        <div className="p-2 text-center bg-purple-50/60">
+                          <span className="text-[10px] font-black text-purple-900 block">SISA SALDO KAS ATK</span>
+                          <strong className="font-mono font-black text-purple-700 block text-xs">
+                            {formatRp(bkuResult.saldoAkhir)}
+                          </strong>
+                          <span className="text-[9px] text-purple-600 font-semibold">Kas Ditutup</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* TABEL FORMAT STANDAR BKU RESMI (8 KOLOM SESUAI FOTO: NO, TANGGAL, NOMOR B/K, KODE REF, URAIAN, DEBIT, KREDIT, SALDO) */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse border border-slate-400 text-[11px]">
+                        <thead>
+                          <tr className="bg-slate-100 font-bold border-b border-slate-400 text-center text-slate-800">
+                            <th className="p-1.5 border-r border-slate-400 w-10">NO</th>
+                            <th className="p-1.5 border-r border-slate-400 w-28">TANGGAL</th>
+                            <th className="p-1.5 border-r border-slate-400 w-28">NOMOR B/K</th>
+                            <th className="p-1.5 border-r border-slate-400 w-24">KODE REFERENSI</th>
+                            <th className="p-1.5 border-r border-slate-400">URAIAN</th>
+                            <th className="p-1.5 border-r border-slate-400 text-right w-28">DEBIT</th>
+                            <th className="p-1.5 border-r border-slate-400 text-right w-28">KREDIT</th>
+                            <th className="p-1.5 text-right w-28">SALDO</th>
+                          </tr>
+                          <tr className="bg-slate-50 text-[9px] border-b border-slate-400 text-center text-slate-600 font-normal">
+                            <th className="p-0.5 border-r border-slate-400">1</th>
+                            <th className="p-0.5 border-r border-slate-400">2</th>
+                            <th className="p-0.5 border-r border-slate-400">3</th>
+                            <th className="p-0.5 border-r border-slate-400">4</th>
+                            <th className="p-0.5 border-r border-slate-400">5</th>
+                            <th className="p-0.5 border-r border-slate-400">6</th>
+                            <th className="p-0.5 border-r border-slate-400">7</th>
+                            <th className="p-0.5">8</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-300">
+                          {bkuResult.rows.map((row) => {
+                            const isSpecial = row.tipe === 'saldo-awal' || row.tipe === 'sisa-saldo';
+                            return (
+                              <tr key={row.id} className={isSpecial ? 'bg-slate-100 font-semibold' : 'hover:bg-slate-50'}>
+                                <td className="p-1.5 border-r border-slate-300 text-center font-bold text-slate-700">
+                                  {row.no}
+                                </td>
+                                <td className="p-1.5 border-r border-slate-300 whitespace-nowrap text-center text-slate-700 text-[10px]">
+                                  {row.tanggal}
+                                </td>
+                                <td className="p-1.5 border-r border-slate-300 font-mono text-center text-slate-800 text-[10px]">
+                                  {row.nomorBk || '-'}
+                                </td>
+                                <td className="p-1.5 border-r border-slate-300 font-mono text-center text-slate-600 text-[10px]">
+                                  {row.kodeReferensi || '-'}
+                                </td>
+                                <td className={`p-1.5 border-r border-slate-300 ${isSpecial ? 'font-black text-slate-900' : 'text-slate-800'}`}>
+                                  {row.uraian}
+                                </td>
+                                <td className={`p-1.5 border-r border-slate-300 text-right font-mono font-bold ${
+                                  row.debit > 0 ? (printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900') : 'text-slate-400'
+                                }`}>
+                                  {row.debit > 0 ? row.debit.toLocaleString('id-ID') : '-'}
+                                </td>
+                                <td className={`p-1.5 border-r border-slate-300 text-right font-mono font-bold ${
+                                  row.kredit > 0 ? (printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900') : 'text-slate-400'
+                                }`}>
+                                  {row.kredit > 0 ? row.kredit.toLocaleString('id-ID') : '-'}
+                                </td>
+                                <td className={`p-1.5 text-right font-mono font-black ${
+                                  printColorMode === 'color' ? 'text-purple-800' : 'text-slate-900'
+                                }`}>
+                                  {row.saldo.toLocaleString('id-ID')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-slate-100 font-bold border-t-2 border-slate-400 text-xs text-slate-900">
+                            <td colSpan={5} className="p-2 border-r border-slate-400 text-center font-black uppercase tracking-wider">
+                              JUMLAH
+                            </td>
+                            <td className={`p-2 border-r border-slate-400 text-right font-mono font-black ${
+                              printColorMode === 'color' ? 'text-emerald-700' : 'text-slate-900'
+                            }`}>
+                              {bkuResult.totalPenerimaan.toLocaleString('id-ID')}
+                            </td>
+                            <td className={`p-2 border-r border-slate-400 text-right font-mono font-black ${
+                              printColorMode === 'color' ? 'text-rose-700' : 'text-slate-900'
+                            }`}>
+                              {bkuResult.totalPengeluaran.toLocaleString('id-ID')}
+                            </td>
+                            <td className={`p-2 text-right font-mono font-black ${
+                              printColorMode === 'color' ? 'text-purple-800' : 'text-slate-900'
+                            }`}>
+                              {bkuResult.saldoAkhir.toLocaleString('id-ID')}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    {/* CATATAN TEKS TERBILANG */}
+                    <div className="p-2.5 bg-slate-50 border border-slate-300 rounded text-xs text-slate-700 italic">
+                      Pada hari ini {kotaTanggal}, Buku Kas Pembantu Biaya Proses / ATK Perkara ditutup dengan sisa saldo kas sebesar{' '}
+                      <strong>Rp {bkuResult.saldoAkhir.toLocaleString('id-ID')}</strong> ({terbilang(bkuResult.saldoAkhir)}).
                     </div>
                   </>
                 ) : (
