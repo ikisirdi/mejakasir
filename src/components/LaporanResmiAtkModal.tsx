@@ -329,6 +329,19 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
     ? ` • PERKARA: ${filterNomorPerkara}`
     : '';
 
+  // Estimasi jumlah halaman dokumen untuk nomor halaman di footer
+  const estimatedPages = useMemo(() => {
+    let rowsCount = 0;
+    if (reportType === 'buku-kas-bku') {
+      rowsCount = bkuResult.rows.length;
+    } else if (reportType === 'rekap-persediaan') {
+      rowsCount = inventorySummary.items.length;
+    } else {
+      rowsCount = ledgerWithBalance.length;
+    }
+    return Math.max(1, Math.ceil(rowsCount / 20));
+  }, [reportType, bkuResult.rows.length, inventorySummary.items.length, ledgerWithBalance.length]);
+
   // =========================================================================
   // GENERATOR HTML LAPORAN DOKUMEN CETAK RESMI
   // Mendukung Cetak Buku Kas ATK maupun Rekapitulasi Persediaan Barang Digunakan
@@ -586,8 +599,9 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       padding-top: 6px;
       border-top: 1px solid ${borderCol};
       display: flex;
-      justify-content: space-between;
-      font-size: 8.5px;
+      justify-content: flex-end;
+      font-size: 9px;
+      font-weight: 600;
       color: #64748b;
       page-break-inside: avoid;
     }
@@ -685,8 +699,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
   <!-- CATATAN KAKI DOKUMEN -->
   <div class="footer-doc">
-    <span>Dokumen ini dicetak otomatis melalui Aplikasi SI-PERKARA PA Paniai • Modul Rekapitulasi Persediaan Barang ATK</span>
-    <span>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</span>
+    <span>Halaman 1 dari ${estimatedPages}</span>
   </div>
 </body>
 </html>`;
@@ -888,9 +901,10 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       padding-top: 6px;
       border-top: 1px solid #000000;
       display: flex;
-      justify-content: space-between;
-      font-size: 8.5px;
-      color: #64748b;
+      justify-content: flex-end;
+      font-size: 9px;
+      font-weight: 600;
+      color: #000000;
       page-break-inside: avoid;
     }
   </style>
@@ -988,8 +1002,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
   <!-- CATATAN KAKI DOKUMEN -->
   <div class="footer-doc">
-    <span>Dokumen ini dicetak otomatis melalui Aplikasi SI-PERKARA PA Paniai • Modul Buku Kas Standar BKU ATK</span>
-    <span>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</span>
+    <span>Halaman 1 dari ${estimatedPages}</span>
   </div>
 </body>
 </html>`;
@@ -1189,8 +1202,9 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
       padding-top: 6px;
       border-top: 1px solid ${borderCol};
       display: flex;
-      justify-content: space-between;
-      font-size: 8.5px;
+      justify-content: flex-end;
+      font-size: 9px;
+      font-weight: 600;
       color: #64748b;
       page-break-inside: avoid;
     }
@@ -1292,8 +1306,7 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
 
   <!-- CATATAN KAKI DOKUMEN -->
   <div class="footer-doc">
-    <span>Dokumen ini dicetak otomatis melalui Aplikasi SI-PERKARA PA Paniai • Tab SimulasiAtkPerkara Google Spreadsheet</span>
-    <span>Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}</span>
+    <span>Halaman 1 dari ${estimatedPages}</span>
   </div>
 </body>
 </html>`;
@@ -2621,9 +2634,8 @@ export const LaporanResmiAtkModal: React.FC<LaporanResmiAtkModalProps> = ({
                     </div>
                   )}
 
-                  <div className="mt-8 pt-2 border-t border-slate-200 flex items-center justify-between text-[9px] text-slate-400">
-                    <span>Dokumen ini dicetak resmi melalui Sistem Manajemen Perkara • Tersinkronisasi Tab SimulasiAtkPerkara Google Spreadsheet</span>
-                    <span>Format Resmi Pengadilan Agama</span>
+                  <div className="mt-8 pt-2 border-t border-slate-200 flex items-center justify-end text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                    <span>Halaman 1 dari {estimatedPages}</span>
                   </div>
                 </div>
 
