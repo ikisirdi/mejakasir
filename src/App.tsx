@@ -163,36 +163,38 @@ export default function App() {
   // Helper to recalculate case balances & auto-status whenever SKUM records change
   const updateCasesWithSkumLogs = (
     currentCases: CaseRecord[],
-    skumList: JurnalBiayaSkumRecord[]
+    skumList: JurnalBiayaSkumRecord[],
+    pinjamanList: PinjamanSkumRecord[] = pinjamanSkumRecords
   ): CaseRecord[] => {
     const cleanSkumList = sanitizeSkumRecords(skumList);
     return currentCases.map(c => {
       let caseSkumLogs: JurnalBiayaSkumRecord[] = [];
+      let normCaseNum = '';
       if (c.nomorPerkara) {
-        const normCaseNum = c.nomorPerkara.trim().toLowerCase();
+        normCaseNum = c.nomorPerkara.trim().toLowerCase();
         caseSkumLogs = cleanSkumList.filter(r => r.nomorPerkara && r.nomorPerkara.trim().toLowerCase() === normCaseNum);
       }
 
-      // 1. Separate income vs expenses for this case
+      // 1. Separate income vs expenses for this case (exclude loan mutations from panjar & real court costs)
       let panjarAwalIncomeTotal = 0;
-      let pinjamanRepaymentTotal = 0;
-      let totalPengeluaran = 0;
+      let totalPengeluaranRiil = 0;
 
       caseSkumLogs.forEach(r => {
         const pen = Number(r.penerimaan) || 0;
         const peng = Number(r.pengeluaran) || 0;
-        const uraianLower = (r.uraian || '').toLowerCase();
+        const isLoanRep = SyncService.isPinjamanRepayment(r.uraian, r.kategori, r.keterangan);
+        const isLoanExp = SyncService.isPinjamanExpense(r.uraian, r.kategori, r.keterangan, r.id);
 
-        if (r.kategori === 'Pinjaman' && (uraianLower.includes('pengembalian') || uraianLower.includes('pelunasan'))) {
-          pinjamanRepaymentTotal += pen;
-        } else if (pen > 0 && (r.kategori === 'Panjar' || uraianLower.includes('panjar') || uraianLower.includes('setoran'))) {
-          panjarAwalIncomeTotal += pen;
-        } else if (pen > 0) {
+        // Pengembalian pinjaman BUKAN panjar perkara baru, melainkan pemulihan kas yang dipinjam.
+        // Jangan tambahkan ke panjar awal perkara!
+        if (!isLoanRep && pen > 0) {
           panjarAwalIncomeTotal += pen;
         }
 
-        if (peng > 0) {
-          totalPengeluaran += peng;
+        // Peminjaman saldo kas BUKAN biaya perkara, melainkan kasbon sementara.
+        // Jangan tambahkan ke pengeluaran perkara!
+        if (!isLoanExp && peng > 0) {
+          totalPengeluaranRiil += peng;
         }
       });
 
@@ -200,10 +202,26 @@ export default function App() {
       if (panjarAwalIncomeTotal > 0) {
         basePanjar = panjarAwalIncomeTotal;
       } else if (basePanjar === 0 && (c.saldoPerkara || 0) > 0) {
-        basePanjar = (c.saldoPerkara || 0) + totalPengeluaran;
+        basePanjar = (c.saldoPerkara || 0) + totalPengeluaranRiil;
       }
 
-      const effectivePanjar = basePanjar + pinjamanRepaymentTotal;
+      // Hitung pinjaman yang BELUM lunas untuk perkara ini (jika ada uang panjar perkara ini yang dipinjam)
+      let unpaidLoanForCase = 0;
+      if (normCaseNum) {
+        const caseUnpaid = (pinjamanList || [])
+          .filter(p => p.status === 'BELUM_DIBAYAR' && p.nomorPerkara && p.nomorPerkara.trim().toLowerCase() === normCaseNum)
+          .reduce((sum, p) => sum + (p.jumlah || 0), 0);
+
+        const skumPinjamPeng = caseSkumLogs
+          .filter(r => SyncService.isPinjamanExpense(r.uraian, r.kategori, r.keterangan, r.id))
+          .reduce((sum, r) => sum + (r.pengeluaran || 0), 0);
+        const skumPinjamPen = caseSkumLogs
+          .filter(r => SyncService.isPinjamanRepayment(r.uraian, r.kategori, r.keterangan))
+          .reduce((sum, r) => sum + (r.penerimaan || 0), 0);
+        const skumNetUnpaid = Math.max(0, skumPinjamPeng - skumPinjamPen);
+
+        unpaidLoanForCase = Math.max(caseUnpaid, skumNetUnpaid);
+      }
 
       const hasSisaPanjarLog = caseSkumLogs.some(r =>
         r.kategori === 'Sisa Panjar' ||
@@ -238,17 +256,17 @@ export default function App() {
         ))
       );
 
-      // Determine new balance:
-      // 1. If 'Sisa Panjar' log exists, remaining balance was refunded -> saldo = 0
-      // 2. If SKUM logs exist, dynamically calculate: effectivePanjar - totalPengeluaran
-      // 3. If NO SKUM logs exist at all for this case, restore/retain effectivePanjar or c.saldoPerkara
+      // Logika Penentuan Saldo:
+      // 1. Jika ada log 'Sisa Panjar', sisa panjar telah diserahkan kembali ke pihak -> saldo = 0
+      // 2. Jika ada pinjaman yang belum lunas: debet yang dipinjam mengurangi saldo kas perkara tercatat
+      // 3. Saat pinjaman dikembalikan: unpaidLoanForCase = 0, saldo dikembalikan utuh ke nilai debet awalnya!
       let newSaldo = c.saldoPerkara;
       if (hasSisaPanjarLog) {
         newSaldo = 0;
-      } else if (caseSkumLogs.length > 0) {
-        newSaldo = Math.max(0, effectivePanjar - totalPengeluaran);
-      } else if (effectivePanjar > 0) {
-        newSaldo = effectivePanjar;
+      } else if (caseSkumLogs.length > 0 || basePanjar > 0) {
+        newSaldo = Math.max(0, basePanjar - totalPengeluaranRiil - unpaidLoanForCase);
+      } else if (basePanjar > 0) {
+        newSaldo = Math.max(0, basePanjar - unpaidLoanForCase);
       }
 
       let newStatus: StatusPerkara = c.status || 'Pendaftaran';
@@ -259,7 +277,7 @@ export default function App() {
         newStatus = 'Minutasi';
       } else if (hasPutusanLog || c.tanggalPutus) {
         newStatus = 'Putus';
-      } else if (hasActivityLog || totalPengeluaran > 0 || caseSkumLogs.length > 0) {
+      } else if (hasActivityLog || totalPengeluaranRiil > 0 || caseSkumLogs.length > 0) {
         if (c.status === 'Pendaftaran' || c.status === 'Selesai') {
           newStatus = 'Diperiksa';
         }
@@ -269,8 +287,8 @@ export default function App() {
 
       return {
         ...c,
-        panjarAwal: effectivePanjar > 0 ? effectivePanjar : c.panjarAwal,
-        pengeluaran: caseSkumLogs.length > 0 ? totalPengeluaran : (c.pengeluaran || 0),
+        panjarAwal: basePanjar > 0 ? basePanjar : (c.panjarAwal || 0),
+        pengeluaran: totalPengeluaranRiil,
         saldoPerkara: newSaldo,
         status: newStatus,
         updatedAt: new Date().toISOString()
@@ -1157,7 +1175,7 @@ export default function App() {
     const updatedSkum = [newSkumRecord, ...jurnalSkumRecords];
     updateJurnalSkumState(updatedSkum);
 
-    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum, updatedPinjaman);
     updateCasesState(updatedCases);
 
     const webhook = getWebhookUrl(syncSettings);
@@ -1216,7 +1234,7 @@ export default function App() {
     const updatedSkum = [newSkumRecord, ...jurnalSkumRecords];
     updateJurnalSkumState(updatedSkum);
 
-    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum, updatedPinjaman);
     updateCasesState(updatedCases);
 
     const webhook = getWebhookUrl(syncSettings);
@@ -1351,7 +1369,7 @@ export default function App() {
     }
 
     updateJurnalSkumState(updatedSkum);
-    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum, updatedList);
     updateCasesState(updatedCases);
 
     const webhook = getWebhookUrl(syncSettings);
@@ -1420,7 +1438,7 @@ export default function App() {
     });
     updateJurnalSkumState(updatedSkum);
 
-    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum);
+    const updatedCases = updateCasesWithSkumLogs(cases, updatedSkum, updatedPinjaman);
     updateCasesState(updatedCases);
 
     const webhook = getWebhookUrl(syncSettings);

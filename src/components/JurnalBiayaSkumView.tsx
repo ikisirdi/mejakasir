@@ -498,8 +498,16 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
         return mo === m.num;
       });
 
-      const debet = monthRecords.reduce((s, r) => s + (r.penerimaan || 0), 0);
-      const kredit = monthRecords.reduce((s, r) => s + (r.pengeluaran || 0), 0);
+      // Debet Panjar Murni (tidak mencakup pengembalian kasbon pinjaman agar debet tidak menggelembung)
+      const debet = monthRecords
+        .filter(r => !SyncService.isPinjamanRepayment(r.uraian, r.kategori, r.keterangan))
+        .reduce((s, r) => s + (r.penerimaan || 0), 0);
+
+      // Kredit Biaya Perkara Riil (tidak mencakup peminjaman sementara kasir)
+      const kredit = monthRecords
+        .filter(r => !SyncService.isPinjamanExpense(r.uraian, r.kategori, r.keterangan, r.id))
+        .reduce((s, r) => s + (r.pengeluaran || 0), 0);
+
       const netMonth = debet - kredit;
       runningCumulative += netMonth;
 
@@ -561,13 +569,9 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       });
   }, [records, searchQuery, filterNomorPerkara, filterCategory, filterBulan, filterTahun, filterWarna, sortDirection]);
 
-  // Calculate totals
-  const totalDebet = filteredRecords.reduce((acc, r) => acc + (r.penerimaan || 0), 0);
-  const totalKredit = filteredRecords.reduce((acc, r) => acc + (r.pengeluaran || 0), 0);
-  const saldoSkum = totalDebet - totalKredit;
-
   // Analisis Logika Penerimaan Debet SKUM:
-  // Memisahkan Panjar Awal Murni dari Perkara Masuk vs Pengembalian/Pelunasan Pinjaman Kasir
+  // Memisahkan Panjar Awal Murni Perkara Masuk vs Pengembalian/Pelunasan Pinjaman Kasir
+  // Pengembalian pinjaman adalah pemulihan kas yang dipinjam, BUKAN pendapatan panjar perkara baru.
   const debetBreakdown = useMemo(() => {
     const casePanjars: { nomorPerkara: string; nominal: number; tanggal: string; uraian: string; jenisPerkara: string; namaPihak: string }[] = [];
     const nonCaseDebets: { nomorPerkara: string; nominal: number; tanggal: string; uraian: string; kategori: string }[] = [];
@@ -579,7 +583,8 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       const pen = Number(r.penerimaan) || 0;
       if (pen <= 0) return;
 
-      const isLoanRepayment = r.kategori === 'Pinjaman' || 
+      const isLoanRepayment = SyncService.isPinjamanRepayment(r.uraian, r.kategori, r.keterangan) ||
+        r.kategori === 'Pinjaman' || 
         (r.uraian && (
           r.uraian.toLowerCase().includes('pengembalian pinjaman') || 
           r.uraian.toLowerCase().includes('pelunasan pinjaman') ||
@@ -627,6 +632,45 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
       totalDebetMutasi: totalPanjarMurni + totalNonPanjarDebet
     };
   }, [filteredRecords, cases]);
+
+  // Analisis Logika Pengeluaran Kredit SKUM:
+  // Memisahkan Biaya Operasional Perkara Riil vs Peminjaman Saldo Kas
+  const kreditBreakdown = useMemo(() => {
+    let totalBiayaPerkaraMurni = 0;
+    let totalPinjamanKeluar = 0;
+    const biayaPerkaraList: JurnalBiayaSkumRecord[] = [];
+    const pinjamanKeluarList: JurnalBiayaSkumRecord[] = [];
+
+    filteredRecords.forEach(r => {
+      const peng = Number(r.pengeluaran) || 0;
+      if (peng <= 0) return;
+
+      const isLoanExpense = SyncService.isPinjamanExpense(r.uraian, r.kategori, r.keterangan, r.id);
+      if (isLoanExpense) {
+        totalPinjamanKeluar += peng;
+        pinjamanKeluarList.push(r);
+      } else {
+        totalBiayaPerkaraMurni += peng;
+        biayaPerkaraList.push(r);
+      }
+    });
+
+    return {
+      totalBiayaPerkaraMurni,
+      totalPinjamanKeluar,
+      biayaPerkaraList,
+      pinjamanKeluarList,
+      totalKreditMutasi: totalBiayaPerkaraMurni + totalPinjamanKeluar
+    };
+  }, [filteredRecords]);
+
+  // Calculate totals:
+  // totalDebet adalah Panjar Murni perkara masuk (tidak ditambah sembarangan oleh pengembalian pinjaman)
+  // totalKredit adalah Biaya Perkara Riil (tidak digelembungkan oleh kasbon pinjaman sementara)
+  // saldoSkum adalah Saldo Bersih Buku SKUM Perkara (Debet Panjar - Kredit Biaya Riil)
+  const totalDebet = debetBreakdown.totalPanjarMurni;
+  const totalKredit = kreditBreakdown.totalBiayaPerkaraMurni;
+  const saldoSkum = totalDebet - totalKredit;
 
   // Analisis Rincian Biaya Kas berdasarkan Status Setor:
   // 1. Biaya yang SUDAH DISETOR ke Bendahara Penerimaan / Kas Negara (Hijau)
@@ -705,13 +749,17 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
   // Perhitungan Kas Standar & Sisa Panjar Murni Perkara untuk Kas Opname Kasir
   const { totalSisaPanjarMurniPerkara, saldoFisikStandarBuku, uangTunaiSeharusnyaDiLaci, selisihAuditKasir } = useMemo(() => {
-    // Sisa panjar murni seluruh perkara aktif (tanpa kepaniteraan)
+    // Sisa panjar murni seluruh perkara aktif (tanpa kepaniteraan & tanpa mutasi kasbon pinjaman)
     const perkaraMap = new Map<string, number>();
     records.forEach(r => {
       const no = r.nomorPerkara ? r.nomorPerkara.trim() : '';
       if (no && !no.toLowerCase().includes('kepaniteraan')) {
+        const isLoanRep = SyncService.isPinjamanRepayment(r.uraian, r.kategori, r.keterangan);
+        const isLoanExp = SyncService.isPinjamanExpense(r.uraian, r.kategori, r.keterangan, r.id);
+        const pen = isLoanRep ? 0 : (Number(r.penerimaan) || 0);
+        const peng = isLoanExp ? 0 : (Number(r.pengeluaran) || 0);
         const cur = perkaraMap.get(no) || 0;
-        perkaraMap.set(no, cur + (Number(r.penerimaan) || 0) - (Number(r.pengeluaran) || 0));
+        perkaraMap.set(no, cur + pen - peng);
       }
     });
 
@@ -1549,16 +1597,16 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               </div>
             </div>
             <div className="font-mono text-lg font-extrabold text-emerald-600 dark:text-emerald-400">
-              Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
+              Rp {totalDebet.toLocaleString('id-ID')}
             </div>
             <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[9px]">
               <span className="text-slate-500 dark:text-slate-400">
                 {debetBreakdown.totalNonPanjarDebet > 0 
-                  ? `+ Rp ${debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')} Bon` 
+                  ? `+ Rp ${debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')} Kembali Kas` 
                   : 'Panjar Murni'}
               </span>
               <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
-                Mutasi: Rp {totalDebet.toLocaleString('id-ID')}
+                Mutasi: Rp {debetBreakdown.totalDebetMutasi.toLocaleString('id-ID')}
               </span>
             </div>
           </div>
@@ -1584,16 +1632,20 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               Rp {totalKredit.toLocaleString('id-ID')}
             </div>
             <div className="flex items-center justify-between mt-1 text-[9px]">
-              <span className="text-slate-400">Potongan Jurnal SKUM</span>
-              {effectiveBiayaKasBelumDisetor > 0 && (
+              <span className="text-slate-400">Biaya Perkara Riil</span>
+              {kreditBreakdown.totalPinjamanKeluar > 0 ? (
+                <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
+                  + Rp {kreditBreakdown.totalPinjamanKeluar.toLocaleString('id-ID')} Pinjam
+                </span>
+              ) : effectiveBiayaKasBelumDisetor > 0 ? (
                 <span className="text-amber-600 dark:text-amber-400 font-bold font-mono">
                   🟡 Belum: Rp {effectiveBiayaKasBelumDisetor.toLocaleString('id-ID')}
                 </span>
-              )}
+              ) : null}
             </div>
           </div>
           <div className="text-[9px] text-slate-400 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-            {records.length} Transaksi Biaya
+            {kreditBreakdown.biayaPerkaraList.length} Transaksi Biaya
           </div>
         </div>
 
@@ -1629,7 +1681,15 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
             }`}>
               Rp {saldoSkum.toLocaleString('id-ID')}
             </div>
-            <span className="text-[9px] text-slate-400 block mt-1">Debet - Kredit Berjalan</span>
+            <div className="text-[9px] text-slate-400 mt-1">
+              {effectiveUnpaidLoanAmount > 0 ? (
+                <span className="text-amber-600 dark:text-amber-400 font-medium">
+                  Kas: Rp {(saldoSkum - effectiveUnpaidLoanAmount).toLocaleString('id-ID')} (-Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')})
+                </span>
+              ) : (
+                <span>Debet Panjar - Kredit Biaya (100% Utuh)</span>
+              )}
+            </div>
           </div>
           <div className="text-[9px] text-sky-600 dark:text-sky-400 font-semibold pt-1 border-t border-slate-100 dark:border-slate-800/80">
             Klik Bedah Rincian
@@ -2570,15 +2630,43 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                 <tr className={`border-t font-black text-xs ${
                   isLight ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-white'
                 }`}>
-                  <td colSpan={4} className="p-3 text-right uppercase tracking-wider">TOTAL KESELURUHAN SKUM:</td>
+                  <td colSpan={4} className="p-3 text-right uppercase tracking-wider">
+                    <div>TOTAL BUKU SKUM PERKARA:</div>
+                    {(debetBreakdown.totalNonPanjarDebet > 0 || kreditBreakdown.totalPinjamanKeluar > 0) && (
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 lowercase">
+                        (debet panjar murni & kredit biaya perkara riil)
+                      </div>
+                    )}
+                  </td>
                   <td className="p-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
-                    Rp {totalDebet.toLocaleString('id-ID')}
+                    <div>Rp {totalDebet.toLocaleString('id-ID')}</div>
+                    {debetBreakdown.totalNonPanjarDebet > 0 && (
+                      <div className="text-[9px] font-normal text-slate-500 dark:text-slate-400">
+                        +Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')} kembali
+                      </div>
+                    )}
                   </td>
                   <td className="p-3 text-right font-mono text-rose-600 dark:text-rose-400">
-                    Rp {totalKredit.toLocaleString('id-ID')}
+                    <div>Rp {totalKredit.toLocaleString('id-ID')}</div>
+                    {kreditBreakdown.totalPinjamanKeluar > 0 && (
+                      <div className="text-[9px] font-normal text-slate-500 dark:text-slate-400">
+                        +Rp {kreditBreakdown.totalPinjamanKeluar.toLocaleString('id-ID')} pinjam
+                      </div>
+                    )}
                   </td>
-                  <td colSpan={3} className="p-3 text-center font-mono text-sky-600 dark:text-sky-400">
-                    Saldo: Rp {saldoSkum.toLocaleString('id-ID')}
+                  <td colSpan={3} className="p-3 text-center font-mono">
+                    <div className="text-sky-600 dark:text-sky-400 font-extrabold">
+                      Saldo Buku: Rp {saldoSkum.toLocaleString('id-ID')}
+                    </div>
+                    {effectiveUnpaidLoanAmount > 0 ? (
+                      <div className="text-[10px] text-amber-600 dark:text-amber-400 font-bold">
+                        Kas Tersedia: Rp {(saldoSkum - effectiveUnpaidLoanAmount).toLocaleString('id-ID')} (Pinjaman: -Rp {effectiveUnpaidLoanAmount.toLocaleString('id-ID')})
+                      </div>
+                    ) : (
+                      <div className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        ✓ Seluruh Pinjaman Lunas (Kas Utuh 100%)
+                      </div>
+                    )}
                   </td>
                 </tr>
               </tfoot>
@@ -4910,7 +4998,7 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                     </span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Transparansi perhitungan Panjar Awal Perkara Masuk (Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}) vs Mutasi Debet Buku (Rp {totalDebet.toLocaleString('id-ID')})
+                    Transparansi perhitungan Panjar Awal Perkara Masuk (Rp {totalDebet.toLocaleString('id-ID')}) & Pemulihan Kas Pinjaman (Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')})
                   </p>
                 </div>
               </div>
@@ -4931,20 +5019,19 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
               }`}>
                 <h4 className="font-extrabold text-sm mb-1.5 flex items-center gap-1.5 text-emerald-900 dark:text-emerald-300">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>Penjelasan Logika Perhitungan Angka Debet:</span>
+                  <span>Penjelasan Logika Perhitungan Angka Debet & Pemulihan Kas Pinjaman:</span>
                 </h4>
                 <p className="leading-relaxed text-[11px] mb-3 text-slate-700 dark:text-slate-300">
-                  Ketika Anda menghitung ulang <strong>panjar awal dari seluruh perkara yang masuk</strong>, totalnya adalah 
-                  <strong className="text-emerald-700 dark:text-emerald-300 font-mono"> Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}</strong> ({debetBreakdown.casePanjars.length} Perkara). 
-                  Sedangkan angka <strong>Rp {totalDebet.toLocaleString('id-ID')}</strong> pada pembukuan Jurnal SKUM adalah <strong>Total Mutasi Debet</strong> yang mencakup pengembalian saldo pinjaman materai kasir sebesar 
-                  <strong className="text-amber-700 dark:text-amber-300 font-mono"> Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}</strong>.
+                  Total <strong>Debet Buku SKUM</strong> dihitung murni dari <strong>panjar awal seluruh perkara yang masuk</strong>, yaitu 
+                  <strong className="text-emerald-700 dark:text-emerald-300 font-mono"> Rp {totalDebet.toLocaleString('id-ID')}</strong> ({debetBreakdown.casePanjars.length} Perkara). 
+                  Ketika kasbon atau pinjaman saldo dikembalikan sebesar <strong className="text-amber-700 dark:text-amber-300 font-mono">Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}</strong>, transaksi tersebut berfungsi memulihkan kembali nilai debet kas yang sebelumnya dipinjam (bukan menambah pendapatan panjar baru), sehingga perhitungan Saldo Buku SKUM tetap presisi, wajar, dan kas fisik kembali 100% utuh.
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 shadow-xs">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">1. Panjar Murni Perkara Masuk</span>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">1. Debet Panjar Murni Perkara</span>
                     <span className="font-mono text-base font-extrabold text-emerald-600 dark:text-emerald-400">
-                      Rp {debetBreakdown.totalPanjarMurni.toLocaleString('id-ID')}
+                      Rp {totalDebet.toLocaleString('id-ID')}
                     </span>
                     <span className="text-[9px] text-slate-400 block mt-0.5">
                       {debetBreakdown.gugatanPanjars.length} Gugatan + {debetBreakdown.permohonanPanjars.length} Permohonan
@@ -4952,22 +5039,22 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
                   </div>
 
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 shadow-xs">
-                    <span className="text-[10px] text-amber-600 uppercase font-bold block mb-1">2. Pengembalian Pinjaman</span>
+                    <span className="text-[10px] text-amber-600 uppercase font-bold block mb-1">2. Pemulihan Kas Pinjaman</span>
                     <span className="font-mono text-base font-extrabold text-amber-600 dark:text-amber-400">
                       + Rp {debetBreakdown.totalNonPanjarDebet.toLocaleString('id-ID')}
                     </span>
                     <span className="text-[9px] text-slate-400 block mt-0.5">
-                      Pelunasan bon materai (27/08/2026)
+                      Nilai kas dipulihkan kembali utuh
                     </span>
                   </div>
 
                   <div className="p-3 rounded-xl bg-emerald-600 text-white shadow-xs">
-                    <span className="text-[10px] text-emerald-100 uppercase font-bold block mb-1">3. Total Mutasi Debet SKUM</span>
+                    <span className="text-[10px] text-emerald-100 uppercase font-bold block mb-1">3. Total Mutasi Kas Masuk</span>
                     <span className="font-mono text-base font-black">
-                      = Rp {totalDebet.toLocaleString('id-ID')}
+                      = Rp {debetBreakdown.totalDebetMutasi.toLocaleString('id-ID')}
                     </span>
                     <span className="text-[9px] text-emerald-100/80 block mt-0.5">
-                      Seluruh uang masuk ke buku SKUM
+                      Akumulasi seluruh arus uang masuk kasir
                     </span>
                   </div>
                 </div>
@@ -5074,8 +5161,10 @@ export const JurnalBiayaSkumView: React.FC<JurnalBiayaSkumViewProps> = ({
 
             {/* Footer */}
             <div className="px-6 py-4 border-t flex items-center justify-between shrink-0 border-slate-200 dark:border-slate-800">
-              <div className="text-[11px] text-slate-500">
-                Total Mutasi Debet SKUM = <strong>Rp {totalDebet.toLocaleString('id-ID')}</strong>
+              <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                <span>Debet Panjar Murni: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">Rp {totalDebet.toLocaleString('id-ID')}</strong></span>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <span>Total Mutasi Masuk: <strong className="text-slate-700 dark:text-slate-300 font-mono">Rp {debetBreakdown.totalDebetMutasi.toLocaleString('id-ID')}</strong></span>
               </div>
               <button
                 onClick={() => setIsDebetBreakdownModalOpen(false)}
