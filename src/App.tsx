@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   CaseRecord, 
   FilterState, 
@@ -16,6 +16,7 @@ import { StorageService, TARGET_APPS_SCRIPT_URL, TARGET_SPREADSHEET_URL } from '
 import { SyncService } from './services/syncService';
 import { generateAtkSimulationDeterministic, migrateLegacySimulasiAtkRecords, mergeSimulasiAtkRecords } from './data/atkRubric';
 import { Navbar } from './components/Navbar';
+import { Sidebar } from './components/Sidebar';
 import { CaseTable } from './components/CaseTable';
 import { BukuBiayaProses } from './components/BukuBiayaProses';
 import { BukuBantuAtk } from './components/BukuBantuAtk';
@@ -49,6 +50,26 @@ export default function App() {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(nextTheme);
     localStorage.setItem('pa_perkara_theme_v1', nextTheme);
+  };
+
+  // Sidebar States (Collapsible / Hideable)
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('pa_perkara_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('pa_perkara_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
   };
 
   // Filter State
@@ -1838,6 +1859,10 @@ export default function App() {
   }).length;
   const isLight = theme === 'light';
 
+  const totalSaldoPerkaraAll = useMemo(() => {
+    return cases.reduce((acc, c) => acc + (Number(c.saldoPerkara) || 0), 0);
+  }, [cases]);
+
   return (
     <div className={`min-h-screen font-sans flex flex-col transition-colors duration-200 ${
       isLight 
@@ -1847,33 +1872,59 @@ export default function App() {
       
       {/* Navigation Header */}
       <Navbar
+        onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
+        isSidebarCollapsed={isSidebarCollapsed}
+        onToggleCollapse={handleToggleSidebarCollapse}
         onOpenForm={() => {
           setEditingRecord(undefined);
           setIsFormOpen(true);
         }}
-        onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onRefreshLive={handleForceReload}
         isRefreshing={isRefreshing}
-        onOpenGithubModal={() => setIsGithubModalOpen(true)}
-        onOpenCacheModal={() => setIsCacheModalOpen(true)}
         onToggleNotifPopover={() => setIsNotifOpen(prev => !prev)}
         unreadNotifCount={unreadNotifCount}
-        syncSettings={syncSettings}
-        cacheMeta={cacheMeta}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        countKasKuning={countKasKuning}
-        pendingSimulasiAtkCount={pendingSimulasiAtkCount}
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onOpenCetakLaporanAtk={() => {
           setActiveTab('simulasi-atk-ai');
           setIsLaporanAtkModalOpen(true);
         }}
+        countKasKuning={countKasKuning}
+        totalPerkara={cases.length}
+        totalSaldoPerkara={totalSaldoPerkaraAll}
       />
 
-      {/* Main Container - Responsive layout adapting to full width */}
-      <main className="flex-1 max-w-[100%] xl:max-w-[1700px] 2xl:max-w-[1920px] w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
+      {/* Main Workspace Layout (Sidebar + Scrollable Content) */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* Collapsible / Hideable Sidebar */}
+        <Sidebar
+          isOpen={isSidebarOpen}
+          isCollapsed={isSidebarCollapsed}
+          onCloseMobile={() => setIsSidebarOpen(false)}
+          onToggleCollapse={handleToggleSidebarCollapse}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          countKasKuning={countKasKuning}
+          pendingSimulasiAtkCount={pendingSimulasiAtkCount}
+          totalPerkara={cases.length}
+          totalSaldoPerkara={totalSaldoPerkaraAll}
+          cacheMeta={cacheMeta}
+          onOpenSyncModal={() => setIsSyncModalOpen(true)}
+          onOpenCacheModal={() => setIsCacheModalOpen(true)}
+          onOpenCetakLaporanAtk={() => {
+            setActiveTab('simulasi-atk-ai');
+            setIsLaporanAtkModalOpen(true);
+          }}
+          theme={theme}
+        />
+
+        {/* Scrollable View Area */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+          
+          {/* Main Container - Responsive layout adapting to full width */}
+          <main className="flex-1 max-w-[100%] xl:max-w-[1700px] 2xl:max-w-[1920px] w-full mx-auto px-3 sm:px-6 lg:px-8 py-5">
         
         {/* Dynamic View rendering */}
         {activeTab === 'kas-kuning' ? (
@@ -1973,6 +2024,9 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+        </div>
+      </div>
 
       {/* Modals & Popovers */}
       <CaseFormModal
