@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { BiayaProsesRecord, CaseRecord, JurnalBiayaSkumRecord, SyncSettings } from '../types';
 import { Lipa7aReportModal } from './Lipa7aReportModal';
+import { CetakBukuBiayaModal } from './CetakBukuBiayaModal';
 import { 
   Printer, 
   PlusCircle, 
@@ -137,7 +138,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
     return 'table';
   });
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
-  const [isPrintJurnalModalOpen, setIsPrintJurnalModalOpen] = useState<boolean>(false);
+  const [printModalReportType, setPrintModalReportType] = useState<'rekap-bulanan' | 'jurnal-biaya'>('rekap-bulanan');
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isAtkModalOpen, setIsAtkModalOpen] = useState<boolean>(false);
   const [isLipa7aOpen, setIsLipa7aOpen] = useState<boolean>(false);
@@ -490,19 +491,9 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
   };
 
   const handlePrintTrigger = () => {
+    setPrintModalReportType('rekap-bulanan');
     setIsPrintModalOpen(true);
-    setTimeout(() => {
-      window.print();
-    }, 300);
   };
-
-  // Pad printable table rows to at least 13 rows for standard register appearance
-  const printRows = useMemo(() => {
-    const rows = [...filteredRecords];
-    const minRows = 13;
-    const missing = minRows - rows.length;
-    return { rows, missingCount: missing > 0 ? missing : 0 };
-  }, [filteredRecords]);
 
   return (
     <div className="space-y-6 w-full">
@@ -592,7 +583,10 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
           {/* Print Jurnal Biaya Button */}
           <button
             id="print-jurnal-biaya-btn"
-            onClick={() => setIsPrintJurnalModalOpen(true)}
+            onClick={() => {
+              setPrintModalReportType('jurnal-biaya');
+              setIsPrintModalOpen(true);
+            }}
             className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 border border-indigo-500/40"
             title="Cetak Tabel Log Jurnal Biaya SKUM Perkara"
           >
@@ -603,8 +597,12 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
           {/* Print Button */}
           <button
             id="print-buku-bantu-btn"
-            onClick={handlePrintTrigger}
+            onClick={() => {
+              setPrintModalReportType('rekap-bulanan');
+              setIsPrintModalOpen(true);
+            }}
             className="flex items-center space-x-1.5 px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95"
+            title="Cetak Rekap Bulanan Buku Bantu Biaya Proses"
           >
             <Printer className="w-4 h-4" />
             <span>Cetak Rekap Bulanan</span>
@@ -1764,169 +1762,18 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
         </div>
       )}
 
-      {/* MODAL 3: CETAK / PRINT PREVIEW EXACT TO USER SPECIFICATIONS */}
-      {isPrintModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-slate-950/90 backdrop-blur-md overflow-y-auto">
-          <div className="bg-white text-black w-full max-w-4xl rounded-xl shadow-2xl p-6 sm:p-10 space-y-6 my-auto print:p-0 print:shadow-none print:w-full print:max-w-none">
-            
-            {/* Print Modal Header Action Bar (Hidden when printing) */}
-            <div className="flex items-center justify-between pb-4 border-b border-gray-300 print:hidden">
-              <div className="flex items-center space-x-2">
-                <Printer className="w-5 h-5 text-amber-600" />
-                <h3 className="font-bold text-gray-800 text-sm sm:text-base">
-                  Pratinjau Cetak Resmi - BUKU BANTU BIAYA PROSES
-                </h3>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg shadow-md transition-colors flex items-center space-x-1.5"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Cetak Sekarang</span>
-                </button>
-                <button
-                  onClick={() => setIsPrintModalOpen(false)}
-                  className="p-1.5 text-gray-500 hover:text-black rounded-lg hover:bg-gray-200"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* PRINTABLE DOCUMENT CONTENT (STRICT USER SPECIFICATION FORMAT) */}
-            <div id="printable-buku-bantu" className="space-y-6 font-serif text-black leading-tight">
-              
-              {/* Document Header */}
-              <div className="text-center font-bold space-y-1">
-                <h1 className="text-base sm:text-lg tracking-wide uppercase">BUKU BANTU BIAYA PROSES</h1>
-                <h2 className="text-sm sm:text-base tracking-wider uppercase">PENGADILAN AGAMA PANIAI</h2>
-                <h3 className="text-xs sm:text-sm tracking-widest">TAHUN 2026</h3>
-                <p className="text-xs sm:text-sm pt-2">
-                  BULAN : <span className="border-b border-dotted border-black px-4 font-mono uppercase">{selectedMonth === 'ALL' ? '...................................' : selectedMonth}</span>
-                </p>
-              </div>
-
-              {/* Document Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs border-collapse border border-black text-center">
-                  <thead>
-                    <tr className="font-bold uppercase bg-gray-100 border-b border-black">
-                      <th className="border border-black p-2 w-8" rowSpan={2}>NO</th>
-                      <th className="border border-black p-2 w-24" rowSpan={2}>TANGGAL</th>
-                      <th className="border border-black p-2 w-36" rowSpan={2}>NOMOR PERKARA</th>
-                      <th className="border border-black p-2" rowSpan={2}>URAIAN</th>
-                      <th className="border border-black p-2" colSpan={2}>JUMLAH</th>
-                      <th className="border border-black p-2 w-24" rowSpan={2}>KET</th>
-                    </tr>
-                    <tr className="font-bold uppercase bg-gray-100 border-b border-black">
-                      <th className="border border-black p-1.5 w-28">PENERIMAAN</th>
-                      <th className="border border-black p-1.5 w-28">PENGELUARAN</th>
-                    </tr>
-                    {/* Column index indicator row (1..7) */}
-                    <tr className="bg-gray-200 font-bold border-b border-black text-[10px]">
-                      <td className="border border-black py-0.5">1</td>
-                      <td className="border border-black py-0.5">2</td>
-                      <td className="border border-black py-0.5">3</td>
-                      <td className="border border-black py-0.5">4</td>
-                      <td className="border border-black py-0.5">5</td>
-                      <td className="border border-black py-0.5">6</td>
-                      <td className="border border-black py-0.5">7</td>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {/* Actual Rows */}
-                    {printRows.rows.map((r, i) => (
-                      <tr key={r.id} className="border-b border-black text-[11px]">
-                        <td className="border border-black py-1 px-1 font-bold">{i + 1}</td>
-                        <td className="border border-black py-1 px-1">{formatShortDate(r.tanggal)}</td>
-                        <td className="border border-black py-1 px-1 font-mono font-semibold">{r.nomorPerkara}</td>
-                        <td className="border border-black py-1 px-2 text-left">{r.uraian}</td>
-                        <td className="border border-black py-1 px-2 text-right">
-                          {r.penerimaan > 0 ? r.penerimaan.toLocaleString('id-ID') : '-'}
-                        </td>
-                        <td className="border border-black py-1 px-2 text-right">
-                          {r.pengeluaran > 0 ? r.pengeluaran.toLocaleString('id-ID') : '-'}
-                        </td>
-                        <td className="border border-black py-1 px-1 text-left">{r.keterangan || '-'}</td>
-                      </tr>
-                    ))}
-
-                    {/* Empty Padding Rows to guarantee clean register look */}
-                    {Array.from({ length: printRows.missingCount }).map((_, idx) => {
-                      const rowNum = printRows.rows.length + idx + 1;
-                      return (
-                        <tr key={`empty-${idx}`} className="border-b border-black text-[11px] h-7">
-                          <td className="border border-black py-1 px-1 font-bold">{rowNum}</td>
-                          <td className="border border-black py-1 px-1"></td>
-                          <td className="border border-black py-1 px-1"></td>
-                          <td className="border border-black py-1 px-2"></td>
-                          <td className="border border-black py-1 px-2"></td>
-                          <td className="border border-black py-1 px-2"></td>
-                          <td className="border border-black py-1 px-1"></td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-
-                  <tfoot>
-                    <tr className="font-bold bg-gray-100 border-t-2 border-black text-xs">
-                      <td colSpan={4} className="border border-black p-2 text-right uppercase">JUMLAH TOTAL</td>
-                      <td className="border border-black p-2 text-right font-mono">
-                        Rp {totalPenerimaan.toLocaleString('id-ID')}
-                      </td>
-                      <td className="border border-black p-2 text-right font-mono">
-                        Rp {totalPengeluaran.toLocaleString('id-ID')}
-                      </td>
-                      <td className="border border-black p-2"></td>
-                    </tr>
-                    <tr className="font-bold bg-gray-100 border-t border-black text-xs">
-                      <td colSpan={4} className="border border-black p-2 text-right uppercase">SALDO KAS BUKU BANTU BIAYA PROSES</td>
-                      <td colSpan={3} className="border border-black p-2 text-center font-mono font-extrabold">
-                        Rp {saldoBiayaProses.toLocaleString('id-ID')}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-
-              {/* Document Signatures (Exact to user prompt template) */}
-              <div className="pt-8 grid grid-cols-2 text-xs font-serif leading-relaxed">
-                
-                {/* Left Signature: Panitera */}
-                <div className="text-left space-y-16">
-                  <div>
-                    <p className="font-bold">Mengetahui,</p>
-                    <p>Panitera</p>
-                  </div>
-                  <div className="pt-12">
-                    <p className="font-bold underline uppercase tracking-wide">ACHMAD HABIBUL ALIM MAPPIASSE, S.H.I., M.H.</p>
-                    <p>NIP. 199210182019031003</p>
-                  </div>
-                </div>
-
-                {/* Right Signature: Petugas Biaya Proses */}
-                <div className="text-right space-y-16">
-                  <div>
-                    <p>
-                      Paniai, <span className="border-b border-dotted border-black px-2">{new Date().getDate()} {selectedMonth === 'ALL' ? MONTH_NAMES[new Date().getMonth()] : selectedMonth} 2026</span>
-                    </p>
-                    <p>Petugas Biaya Proses</p>
-                  </div>
-                  <div className="pt-12">
-                    <p className="font-bold underline uppercase tracking-wide">IDRIS AL BASYIR, A.Md.</p>
-                    <p>NIP. 199601112025061004</p>
-                  </div>
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-        </div>
-      )}
+      {/* PROFESSIONAL PRINT & DOCUMENT PREVIEW MODAL */}
+      <CetakBukuBiayaModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        initialType={printModalReportType}
+        records={records}
+        cases={cases}
+        jurnalSkumRecords={jurnalSkumRecords}
+        selectedMonthDefault={selectedMonth}
+        selectedYearDefault={selectedYear}
+        theme={theme}
+      />
 
       {/* MODAL 4: GENERATE AUTO-ZEROING SALDO PERKARA */}
       {isZeroingModalOpen && selectedZeroingCase && (
@@ -2077,116 +1924,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
         </div>
       )}
 
-      {/* MODAL 4: CETAK TABEL LOG JURNAL BIAYA SKUM */}
-      {isPrintJurnalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-slate-950/90 backdrop-blur-md overflow-y-auto">
-          <div className="bg-white text-black w-full max-w-4xl rounded-xl shadow-2xl p-6 sm:p-10 space-y-6 my-auto print:p-0 print:shadow-none print:w-full print:max-w-none">
-            
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-gray-300 print:hidden">
-              <div className="flex items-center space-x-2">
-                <Printer className="w-5 h-5 text-indigo-600" />
-                <h3 className="font-bold text-gray-800 text-sm sm:text-base">
-                  Pratinjau Cetak - TABEL BUKU JURNAL BIAYA SKUM PERKARA
-                </h3>
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-md transition-colors flex items-center space-x-1.5"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Cetak Jurnal</span>
-                </button>
-                <button
-                  onClick={() => setIsPrintJurnalModalOpen(false)}
-                  className="p-1.5 text-gray-500 hover:text-black rounded-lg hover:bg-gray-200"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
 
-            {/* Printable Document Content */}
-            <div id="printable-jurnal-biaya" className="space-y-6 font-serif text-black leading-tight">
-              <div className="text-center font-bold space-y-1">
-                <h1 className="text-base sm:text-lg tracking-wide uppercase">TABEL BUKU JURNAL BIAYA SKUM PERKARA</h1>
-                <h2 className="text-sm sm:text-base tracking-wider uppercase">PENGADILAN AGAMA</h2>
-                <h3 className="text-xs sm:text-sm tracking-widest">TAHUN 2026</h3>
-                <p className="text-xs sm:text-sm pt-2">
-                  PERIODE / BULAN : <span className="border-b border-dotted border-black px-4 font-mono uppercase">{selectedMonth === 'ALL' ? 'SEMUA BULAN 2026' : selectedMonth}</span>
-                </p>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs border-collapse border border-black text-center">
-                  <thead>
-                    <tr className="font-bold uppercase bg-gray-100 border-b border-black">
-                      <th className="border border-black p-2 w-8">NO</th>
-                      <th className="border border-black p-2 w-24">TANGGAL</th>
-                      <th className="border border-black p-2 w-36">NOMOR PERKARA</th>
-                      <th className="border border-black p-2">URAIAN JURNAL BIAYA</th>
-                      <th className="border border-black p-2 w-24">KATEGORI</th>
-                      <th className="border border-black p-2 w-28">DEBET (PENERIMAAN)</th>
-                      <th className="border border-black p-2 w-28">KREDIT (PENGELUARAN)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRecords.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="border border-black p-4 text-center italic text-gray-500">
-                          Belum ada catatan log jurnal biaya untuk periode {selectedMonth}.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredRecords.map((r, i) => (
-                        <tr key={r.id} className="border-b border-black text-[11px]">
-                          <td className="border border-black py-1 px-1 font-bold">{i + 1}</td>
-                          <td className="border border-black py-1 px-1 font-mono">{formatShortDate(r.tanggal)}</td>
-                          <td className="border border-black py-1 px-1 font-mono font-bold text-left">{r.nomorPerkara}</td>
-                          <td className="border border-black py-1 px-2 text-left">{r.uraian}</td>
-                          <td className="border border-black py-1 px-1 text-center font-bold">{r.kategori}</td>
-                          <td className="border border-black py-1 px-2 text-right font-mono">
-                            {r.penerimaan > 0 ? formatRupiah(r.penerimaan) : '-'}
-                          </td>
-                          <td className="border border-black py-1 px-2 text-right font-mono">
-                            {r.pengeluaran > 0 ? formatRupiah(r.pengeluaran) : '-'}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                  <tfoot>
-                    <tr className="font-bold bg-gray-100 uppercase border-t border-black text-xs">
-                      <th colSpan={5} className="border border-black p-2 text-right">TOTAL JURNAL :</th>
-                      <th className="border border-black p-2 text-right font-mono">{formatRupiah(totalPenerimaan)}</th>
-                      <th className="border border-black p-2 text-right font-mono">{formatRupiah(totalPengeluaran)}</th>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-
-              {/* Signature Block */}
-              <div className="pt-8 grid grid-cols-2 text-xs font-serif text-center">
-                <div>
-                  <p>Mengetahui,</p>
-                  <p className="font-bold">Panitera Pengadilan Agama</p>
-                  <div className="h-16"></div>
-                  <p className="font-bold border-b border-black inline-block px-6">( _______________________ )</p>
-                </div>
-                <div>
-                  <p>Kasir / Petugas Jurnal,</p>
-                  <p className="font-bold">Pengadilan Agama</p>
-                  <div className="h-16"></div>
-                  <p className="font-bold border-b border-black inline-block px-6">( _______________________ )</p>
-                </div>
-              </div>
-
-            </div>
-
-          </div>
-        </div>
-      )}
 
       {/* MODAL ANALISIS PENYEBAB MINUS SALDO KAS AKUMULASI */}
       {isKasMinusModalOpen && (
