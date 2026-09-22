@@ -434,7 +434,18 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
       setFormKategori(existingRecord.kategori || 'ATK');
     } else {
       setEditingId(null);
-      setFormTanggal(new Date().toISOString().split('T')[0]);
+      // Default date to the currently active month/year filter if selected
+      let defaultDate = new Date().toISOString().split('T')[0];
+      if (selectedMonth !== 'ALL') {
+        const mIdx = MONTH_NAMES.indexOf(selectedMonth);
+        if (mIdx !== -1) {
+          const yr = selectedYear !== 'ALL' ? selectedYear : new Date().getFullYear().toString();
+          const moStr = String(mIdx + 1).padStart(2, '0');
+          const dayStr = String(Math.min(new Date().getDate(), 28)).padStart(2, '0');
+          defaultDate = `${yr}-${moStr}-${dayStr}`;
+        }
+      }
+      setFormTanggal(defaultDate);
       setFormNomorPerkara('');
       setFormUraian('');
       setFormJenis('penerimaan');
@@ -471,6 +482,21 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
         keterangan: formKeterangan,
         kategori: formKategori
       });
+    }
+
+    // Automatically align month & year filter with the transaction date so the user sees it immediately
+    if (formTanggal) {
+      const [yr, mo] = formTanggal.split('-');
+      if (yr && selectedYear !== 'ALL' && yr !== selectedYear) {
+        handleSelectYear(yr);
+      }
+      const mIdx = parseInt(mo, 10) - 1;
+      if (mIdx >= 0 && mIdx < MONTH_NAMES.length) {
+        const targetMonth = MONTH_NAMES[mIdx];
+        if (selectedMonth !== 'ALL' && selectedMonth !== targetMonth) {
+          handleSelectMonth(targetMonth);
+        }
+      }
     }
 
     setIsAddModalOpen(false);

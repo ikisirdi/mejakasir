@@ -166,6 +166,7 @@ export class StorageService {
       STORAGE_KEYS.BIAYA_PROSES,
       STORAGE_KEYS.JURNAL_SKUM,
       STORAGE_KEYS.PINJAMAN_SKUM,
+      'pa_perkara_deleted_bp_ids_v1',
     ];
     legacyKeys.forEach(k => {
       try { localStorage.removeItem(k); } catch (e) { /* ignore */ }
@@ -200,9 +201,15 @@ export class StorageService {
 
   static getBiayaProsesRecords(): BiayaProsesRecord[] {
     try {
-      const raw = localStorage.getItem(STORAGE_KEYS.BIAYA_PROSES);
+      let raw = localStorage.getItem(STORAGE_KEYS.BIAYA_PROSES);
+      if (!raw) {
+        raw = localStorage.getItem('pa_perkara_biaya_proses_v1');
+      }
       if (raw) {
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
       }
     } catch (e) {
       console.error('Error loading biaya proses records:', e);
@@ -216,6 +223,40 @@ export class StorageService {
       localStorage.setItem(STORAGE_KEYS.BIAYA_PROSES, JSON.stringify(records));
     } catch (e) {
       console.error('Error saving biaya proses records:', e);
+    }
+  }
+
+  static getDeletedBiayaProsesIds(): string[] {
+    try {
+      const raw = localStorage.getItem('pa_perkara_deleted_bp_ids_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  }
+
+  static addDeletedBiayaProsesId(id: string): void {
+    try {
+      const list = this.getDeletedBiayaProsesIds();
+      if (!list.includes(id)) {
+        list.push(id);
+        localStorage.setItem('pa_perkara_deleted_bp_ids_v1', JSON.stringify(list));
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  static removeDeletedBiayaProsesId(id: string): void {
+    try {
+      const list = this.getDeletedBiayaProsesIds().filter(i => i !== id);
+      localStorage.setItem('pa_perkara_deleted_bp_ids_v1', JSON.stringify(list));
+    } catch (e) {
+      // ignore
     }
   }
 

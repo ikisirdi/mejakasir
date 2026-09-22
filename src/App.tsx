@@ -36,10 +36,10 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('pa_perkara_theme_v1') as 'light' | 'dark') || 'light';
   });
-  const [cases, setCases] = useState<CaseRecord[]>([]);
-  const [biayaProsesRecords, setBiayaProsesRecords] = useState<BiayaProsesRecord[]>([]);
-  const [jurnalSkumRecords, setJurnalSkumRecords] = useState<JurnalBiayaSkumRecord[]>([]);
-  const [pinjamanSkumRecords, setPinjamanSkumRecords] = useState<PinjamanSkumRecord[]>([]);
+  const [cases, setCases] = useState<CaseRecord[]>(() => StorageService.getCases());
+  const [biayaProsesRecords, setBiayaProsesRecords] = useState<BiayaProsesRecord[]>(() => StorageService.getBiayaProsesRecords());
+  const [jurnalSkumRecords, setJurnalSkumRecords] = useState<JurnalBiayaSkumRecord[]>(() => StorageService.getJurnalSkumRecords());
+  const [pinjamanSkumRecords, setPinjamanSkumRecords] = useState<PinjamanSkumRecord[]>(() => StorageService.getPinjamanSkumRecords());
   const [simulasiAtkRecords, setSimulasiAtkRecords] = useState<SimulasiAtkRecord[]>(() => StorageService.getSimulasiAtkRecords());
   const [isLaporanAtkModalOpen, setIsLaporanAtkModalOpen] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -566,12 +566,62 @@ export default function App() {
           StorageService.saveCases(syncedLoaded);
         }
 
-        const effectiveRemoteBiaya = (liveData.biayaProses && liveData.biayaProses.length > 0)
-          ? liveData.biayaProses
-          : (initialReconciledBp.length > 0 ? initialReconciledBp : loadedBiayaProses);
+        // Intelligent bidirectional merge for Biaya Proses:
+        // Always preserve locally added transactions (from manual logs, auto-zeroing, ATK potongan)
+        // so that records are NEVER wiped out when refreshing or syncing with remote sheets!
+        const latestLocalBp = StorageService.getBiayaProsesRecords();
+        const deletedBpIds = new Set(StorageService.getDeletedBiayaProsesIds());
+        const mergedBpMap = new Map<string, BiayaProsesRecord>();
+
+        // 1. Populate from remote sheet if available (excluding user-deleted ones)
+        if (liveData.biayaProses && liveData.biayaProses.length > 0) {
+          for (const rem of liveData.biayaProses) {
+            if (!deletedBpIds.has(rem.id)) {
+              mergedBpMap.set(rem.id, rem);
+            }
+          }
+        }
+
+        // 2. Merge local records:
+        // Include latestLocalBp, initialReconciledBp, and loadedBiayaProses
+        const localCandidates = [
+          ...loadedBiayaProses,
+          ...initialReconciledBp,
+          ...latestLocalBp
+        ];
+
+        for (const loc of localCandidates) {
+          if (deletedBpIds.has(loc.id)) continue;
+
+          if (mergedBpMap.has(loc.id)) {
+            // Keep local copy if it has more recent timestamp or edits
+            const existing = mergedBpMap.get(loc.id)!;
+            const locTime = loc.createdAt ? new Date(loc.createdAt).getTime() : 0;
+            const exTime = existing.createdAt ? new Date(existing.createdAt).getTime() : 0;
+            if (locTime >= exTime) {
+              mergedBpMap.set(loc.id, { ...existing, ...loc });
+            }
+          } else {
+            // Check if there is an exact matching record under a different ID to avoid duplicate display
+            const isDuplicate = Array.from(mergedBpMap.values()).some(r =>
+              (r.nomorPerkara || '').trim().toLowerCase() === (loc.nomorPerkara || '').trim().toLowerCase() &&
+              r.tanggal === loc.tanggal &&
+              (r.uraian || '').trim().toLowerCase() === (loc.uraian || '').trim().toLowerCase() &&
+              Number(r.penerimaan || 0) === Number(loc.penerimaan || 0) &&
+              Number(r.pengeluaran || 0) === Number(loc.pengeluaran || 0)
+            );
+            if (!isDuplicate) {
+              mergedBpMap.set(loc.id, loc);
+            }
+          }
+        }
+
+        const effectiveBiayaList = Array.from(mergedBpMap.values()).sort(
+          (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
+        );
 
         const { reconciled: finalReconciledBp, addedRecords: newBpFromSkum } = SyncService.reconcileBiayaProsesWithSkum(
-          effectiveRemoteBiaya,
+          effectiveBiayaList,
           activeJurnal
         );
 
@@ -579,10 +629,20 @@ export default function App() {
         StorageService.saveBiayaProsesRecords(finalReconciledBp);
 
         const currentWebhook = getWebhookUrl(currentSyncSettings);
-        if (currentWebhook && newBpFromSkum.length > 0) {
-          newBpFromSkum.forEach(rec => {
-            SyncService.postToWebhook(currentWebhook, 'add_biaya_proses', rec);
-          });
+        if (currentWebhook) {
+          if (newBpFromSkum.length > 0) {
+            newBpFromSkum.forEach(rec => {
+              SyncService.postToWebhook(currentWebhook, 'add_biaya_proses', rec);
+            });
+          }
+          // Also sync any local-only records to Google Sheet so remote remains up to date
+          const remoteIdSet = new Set((liveData.biayaProses || []).map(r => r.id));
+          const unsyncedLocals = finalReconciledBp.filter(r => !remoteIdSet.has(r.id) && !newBpFromSkum.some(n => n.id === r.id));
+          if (unsyncedLocals.length > 0) {
+            unsyncedLocals.slice(0, 10).forEach(rec => {
+              SyncService.postToWebhook(currentWebhook, 'add_biaya_proses', rec);
+            });
+          }
         }
 
         if (activeJurnal.length > 0) {
@@ -723,11 +783,23 @@ export default function App() {
   const handleAddBiayaProsesRecord = (record: Omit<BiayaProsesRecord, 'id' | 'createdAt'>) => {
     const newRecord: BiayaProsesRecord = {
       ...record,
-      id: `bp-${Date.now()}`,
+      id: `bp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString()
     };
-    const updated = [...biayaProsesRecords, newRecord];
-    updateBiayaProsesState(updated);
+    StorageService.removeDeletedBiayaProsesId(newRecord.id);
+
+    setBiayaProsesRecords(prev => {
+      const stored = StorageService.getBiayaProsesRecords();
+      const map = new Map<string, BiayaProsesRecord>();
+      stored.forEach(r => map.set(r.id, r));
+      prev.forEach(r => map.set(r.id, r));
+      map.set(newRecord.id, newRecord);
+      const updated = Array.from(map.values()).sort(
+        (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
+      );
+      StorageService.saveBiayaProsesRecords(updated);
+      return updated;
+    });
 
     const webhook = getWebhookUrl(syncSettings);
     if (webhook) {
@@ -744,8 +816,18 @@ export default function App() {
 
   const handleUpdateBiayaProsesRecord = (record: BiayaProsesRecord) => {
     try {
-      const updated = biayaProsesRecords.map(r => r.id === record.id ? record : r);
-      updateBiayaProsesState(updated);
+      setBiayaProsesRecords(prev => {
+        const stored = StorageService.getBiayaProsesRecords();
+        const map = new Map<string, BiayaProsesRecord>();
+        stored.forEach(r => map.set(r.id, r));
+        prev.forEach(r => map.set(r.id, r));
+        map.set(record.id, record);
+        const updated = Array.from(map.values()).sort(
+          (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
+        );
+        StorageService.saveBiayaProsesRecords(updated);
+        return updated;
+      });
 
       const webhook = getWebhookUrl(syncSettings);
       if (webhook) {
@@ -765,13 +847,23 @@ export default function App() {
 
   const handleDeleteBiayaProsesRecord = (id: string) => {
     try {
-      const target = biayaProsesRecords.find(r => r.id === id);
+      const stored = StorageService.getBiayaProsesRecords();
+      const target = stored.find(r => r.id === id) || biayaProsesRecords.find(r => r.id === id);
       if (!target) {
         addNotification('Gagal Menghapus Transaksi', 'Data log transaksi tidak ditemukan.', 'alert');
         return;
       }
-      const updated = biayaProsesRecords.filter(r => r.id !== id);
-      updateBiayaProsesState(updated);
+      StorageService.addDeletedBiayaProsesId(id);
+
+      setBiayaProsesRecords(prev => {
+        const map = new Map<string, BiayaProsesRecord>();
+        stored.forEach(r => map.set(r.id, r));
+        prev.forEach(r => map.set(r.id, r));
+        map.delete(id);
+        const updated = Array.from(map.values());
+        StorageService.saveBiayaProsesRecords(updated);
+        return updated;
+      });
 
       const webhook = getWebhookUrl(syncSettings);
       if (webhook) {
@@ -791,7 +883,7 @@ export default function App() {
 
   const handlePotongAtkPerkara = (nomorPerkara: string, amount: number, uraian: string, tanggal: string) => {
     const newRecord: BiayaProsesRecord = {
-      id: `bp-atk-${Date.now()}`,
+      id: `bp-atk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       tanggal,
       nomorPerkara,
       uraian,
@@ -801,8 +893,20 @@ export default function App() {
       kategori: 'ATK',
       createdAt: new Date().toISOString()
     };
-    const updated = [...biayaProsesRecords, newRecord];
-    updateBiayaProsesState(updated);
+    StorageService.removeDeletedBiayaProsesId(newRecord.id);
+
+    setBiayaProsesRecords(prev => {
+      const stored = StorageService.getBiayaProsesRecords();
+      const map = new Map<string, BiayaProsesRecord>();
+      stored.forEach(r => map.set(r.id, r));
+      prev.forEach(r => map.set(r.id, r));
+      map.set(newRecord.id, newRecord);
+      const updated = Array.from(map.values()).sort(
+        (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
+      );
+      StorageService.saveBiayaProsesRecords(updated);
+      return updated;
+    });
 
     let updatedCaseRecord: CaseRecord | undefined;
     const updatedCases = cases.map(c => {
@@ -857,8 +961,18 @@ export default function App() {
 
     const totalExpense = generatedItems.reduce((sum, item) => sum + item.amount, 0);
 
-    const updatedRecords = [...biayaProsesRecords, ...newRecords];
-    updateBiayaProsesState(updatedRecords);
+    setBiayaProsesRecords(prev => {
+      const stored = StorageService.getBiayaProsesRecords();
+      const map = new Map<string, BiayaProsesRecord>();
+      stored.forEach(r => map.set(r.id, r));
+      prev.forEach(r => map.set(r.id, r));
+      newRecords.forEach(r => map.set(r.id, r));
+      const updated = Array.from(map.values()).sort(
+        (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
+      );
+      StorageService.saveBiayaProsesRecords(updated);
+      return updated;
+    });
 
     let targetUpdatedCase: CaseRecord | undefined;
     const updatedCases = cases.map(c => {
