@@ -275,7 +275,7 @@ function doGet(e) {
           var nomorPerkaraVal = 'Kepaniteraan Umum';
           var ketVal = String(rowP[4] || '');
           var peminjamVal = String(rowP[2] || 'Kepaniteraan');
-          var matchPerk = (ketVal + ' ' + peminjamVal).match(/(?:Perkara\s+)?(\d+\/Pdt\.[A-Za-z]+\/\d{4}\/PA\.[A-Za-z]+)/i);
+          var matchPerk = (ketVal + ' ' + peminjamVal).match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
           if (matchPerk && matchPerk[1]) {
             nomorPerkaraVal = matchPerk[1];
           }
@@ -345,7 +345,7 @@ function doGet(e) {
         if (!alreadyInPinjam) {
           var noPerk = rJ.nomorPerkara || 'Kepaniteraan Umum';
           if (noPerk === 'Kepaniteraan Umum' || noPerk === '-') {
-            var mCase = (rJ.keterangan || rJ.uraian || '').match(/(?:Perkara\s+)?(\d+\/Pdt\.[A-Za-z]+\/\d{4}\/PA\.[A-Za-z]+)/i);
+            var mCase = (rJ.keterangan || rJ.uraian || '').match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
             if (mCase && mCase[1]) noPerk = mCase[1];
           }
           pinjamanSkum.push({

@@ -27,7 +27,8 @@ import {
   Clock,
   RefreshCw,
   ExternalLink,
-  ArrowLeftRight
+  ArrowLeftRight,
+  UploadCloud
 } from 'lucide-react';
 
 interface BukuBiayaProsesProps {
@@ -39,6 +40,8 @@ interface BukuBiayaProsesProps {
   onPotongAtkPerkara: (caseNumber: string, amount: number, uraian: string, tanggal: string) => void;
   onZeroOutCaseBalance?: (caseNumber: string, generatedItems: { uraian: string; amount: number; kategori: 'ATK' | 'Proses' | 'Meterai' | 'Redaksi' | 'Panggilan' | 'Lainnya' }[]) => void;
   onSyncSpreadsheet?: () => void;
+  onPushToCloud?: () => Promise<void> | void;
+  isPushingToCloud?: boolean;
   syncSettings?: SyncSettings;
   theme?: 'light' | 'dark';
   jurnalSkumRecords?: JurnalBiayaSkumRecord[];
@@ -76,6 +79,8 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
   onPotongAtkPerkara,
   onZeroOutCaseBalance,
   onSyncSpreadsheet,
+  onPushToCloud,
+  isPushingToCloud = false,
   syncSettings,
   theme = 'light',
   jurnalSkumRecords = [],
@@ -575,6 +580,24 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
             </button>
           )}
 
+          {/* Push All to Cloud Button */}
+          {onPushToCloud && (
+            <button
+              id="push-biaya-proses-cloud-btn"
+              onClick={onPushToCloud}
+              disabled={isPushingToCloud}
+              className={`flex items-center space-x-1.5 px-3 py-2 border rounded-xl text-xs font-bold transition-all shadow-xs ${
+                isLight
+                  ? 'bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-300 disabled:opacity-50'
+                  : 'bg-slate-800 hover:bg-slate-700 text-blue-400 border-blue-800/60 disabled:opacity-50'
+              }`}
+              title="Kirim dan simpan semua data transaksi Buku Bantu Biaya Proses ke Google Sheets agar sinkron ke device lain"
+            >
+              <UploadCloud className={`w-4 h-4 text-blue-600 ${isPushingToCloud ? 'animate-bounce' : ''}`} />
+              <span>{isPushingToCloud ? 'Menyimpan...' : 'Simpan ke Google Sheets'}</span>
+            </button>
+          )}
+
           {/* Sync / Force Reload Button */}
           {onSyncSpreadsheet && (
             <button
@@ -672,23 +695,35 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
           <RefreshCw className="w-4 h-4 text-blue-600 shrink-0" />
           <div>
             <p className="font-semibold text-xs">
-              Mekanisme Sinkronisasi Google Sheets & Memori Aplikasi:
+              Sinkronisasi Cloud Buku Bantu Biaya Proses (Multi-Device):
             </p>
             <p className="text-[11px] opacity-80 mt-0.5">
-              1) <strong>Membaca Data:</strong> Tombol <span className="font-bold">"Muat dari Spreadsheet"</span> akan langsung memperbarui tabel di aplikasi dari Google Sheets publik (tab LogTransaksi / CSV).
+              1) <strong>Tersimpan Otomatis:</strong> Log transaksi manual & pemotongan ATK otomatis dikirim ke Google Sheets via Webhook Apps Script (`kode.gs`).
               <br />
-              2) <strong>Menulis Data:</strong> Agar perubahan nilai (misal penerimaan Februari) di aplikasi otomatis terkirim kembali ke Google Sheets, pastikan <span className="font-bold">Webhook Apps Script</span> telah terpasang di menu Sinkronisasi.
+              2) <strong>Tampil di Perangkat Lain:</strong> Agar data muncul di komputer / HP lain, pastikan kode.gs di Google Apps Script telah diperbarui. Anda juga dapat menekan <span className="font-bold">"Simpan ke Google Sheets"</span> kapan saja untuk memastikan seluruh transaksi lokal terunggah ke spreadsheet.
             </p>
           </div>
         </div>
-        {onSyncSpreadsheet && (
-          <button
-            onClick={onSyncSpreadsheet}
-            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shrink-0 transition-colors shadow-xs"
-          >
-            Muat Ulang Sekarang
-          </button>
-        )}
+        <div className="flex items-center space-x-2 shrink-0">
+          {onPushToCloud && (
+            <button
+              onClick={onPushToCloud}
+              disabled={isPushingToCloud}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors shadow-xs disabled:opacity-50"
+            >
+              <UploadCloud className={`w-3.5 h-3.5 ${isPushingToCloud ? 'animate-bounce' : ''}`} />
+              <span>{isPushingToCloud ? 'Menyimpan...' : 'Simpan ke Google Sheets'}</span>
+            </button>
+          )}
+          {onSyncSpreadsheet && (
+            <button
+              onClick={onSyncSpreadsheet}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors shadow-xs"
+            >
+              Muat Ulang
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ALERT BANNER: PENGINGAT PERKARA PUTUS/KADALUARSA DENGAN SALDO SISA */}

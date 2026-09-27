@@ -960,8 +960,24 @@ export class SyncService {
           }));
         }
 
+        const mappedBiaya: BiayaProsesRecord[] = (rawBiaya || []).map((b: any, idx: number) => {
+          let tgl = String(b.tanggal || '').trim();
+          if (tgl.includes('T')) tgl = tgl.split('T')[0];
+          return {
+            id: String(b.id || `bp-remote-${idx + 1}-${Date.now()}`),
+            tanggal: tgl || new Date().toISOString().split('T')[0],
+            nomorPerkara: String(b.nomorPerkara || '-'),
+            uraian: String(b.uraian || ''),
+            penerimaan: Number(b.penerimaan || b.debet || b.masuk) || 0,
+            pengeluaran: Number(b.pengeluaran || b.kredit || b.keluar) || 0,
+            kategori: String(b.kategori || 'Proses') as any,
+            keterangan: String(b.keterangan || ''),
+            createdAt: String(b.createdAt || new Date().toISOString())
+          };
+        });
+
         const { reconciled: reconciledBp } = SyncService.reconcileBiayaProsesWithSkum(
-          rawBiaya || [],
+          mappedBiaya,
           mappedJurnal || []
         );
 
@@ -1393,6 +1409,33 @@ export class SyncService {
     }
 
     return records;
+  }
+
+  /**
+   * Push Biaya Proses records to Google Sheets via Webhook
+   */
+  static async pushBiayaProsesToCloud(webhookUrl: string, records: BiayaProsesRecord[]): Promise<{ success: boolean; total: number; synced: number }> {
+    if (!webhookUrl || !webhookUrl.startsWith('http') || !records || records.length === 0) {
+      return { success: false, total: 0, synced: 0 };
+    }
+
+    // Try batch write first
+    const batchSuccess = await this.postToWebhook(webhookUrl, 'batch_biaya_proses', {
+      items: records
+    });
+
+    if (batchSuccess) {
+      return { success: true, total: records.length, synced: records.length };
+    }
+
+    // Fallback: post one by one
+    let synced = 0;
+    for (const item of records) {
+      const ok = await this.postToWebhook(webhookUrl, 'add_biaya_proses', item);
+      if (ok) synced++;
+    }
+
+    return { success: synced > 0, total: records.length, synced };
   }
 
   /**

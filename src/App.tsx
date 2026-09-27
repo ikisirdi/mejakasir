@@ -93,6 +93,7 @@ export default function App() {
   const [jurnalSelectedCase, setJurnalSelectedCase] = useState<CaseRecord | null>(null);
   const [activeToast, setActiveToast] = useState<NotificationItem | null>(null);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isPushingBiayaProses, setIsPushingBiayaProses] = useState<boolean>(false);
 
   // Sanitizer to guarantee SKUM Debet/Kredit correctness and heal legacy corrupted records
   const sanitizeSkumRecords = (records: JurnalBiayaSkumRecord[]): JurnalBiayaSkumRecord[] => {
@@ -639,9 +640,7 @@ export default function App() {
           const remoteIdSet = new Set((liveData.biayaProses || []).map(r => r.id));
           const unsyncedLocals = finalReconciledBp.filter(r => !remoteIdSet.has(r.id) && !newBpFromSkum.some(n => n.id === r.id));
           if (unsyncedLocals.length > 0) {
-            unsyncedLocals.slice(0, 10).forEach(rec => {
-              SyncService.postToWebhook(currentWebhook, 'add_biaya_proses', rec);
-            });
+            SyncService.pushBiayaProsesToCloud(currentWebhook, unsyncedLocals);
           }
         }
 
@@ -1032,6 +1031,43 @@ export default function App() {
         'Seluruh potongan ATK perkara dari Jurnal SKUM sudah tercatat dengan rapi di Buku Bantu Biaya Proses.',
         'info'
       );
+    }
+  };
+
+  const handlePushBiayaProsesToCloud = async () => {
+    const webhook = getWebhookUrl(syncSettings);
+    if (!webhook) {
+      addNotification(
+        'Webhook Belum Terpasang',
+        'Silakan masukkan Webhook URL Google Apps Script pada menu Sinkronisasi Spreadsheet terlebih dahulu.',
+        'alert'
+      );
+      setIsSyncModalOpen(true);
+      return;
+    }
+
+    setIsPushingBiayaProses(true);
+    try {
+      const stored = StorageService.getBiayaProsesRecords();
+      const recordsToPush = stored.length > 0 ? stored : biayaProsesRecords;
+      const res = await SyncService.pushBiayaProsesToCloud(webhook, recordsToPush);
+      if (res.success) {
+        addNotification(
+          'Sinkronisasi Berhasil',
+          `Sebanyak ${res.synced} transaksi Buku Bantu Biaya Proses berhasil tersimpan ke Google Sheets. Data sekarang sinkron dan dapat diakses dari device lain.`,
+          'success'
+        );
+      } else {
+        addNotification(
+          'Gagal Mengirim ke Cloud',
+          'Pastikan kode.gs di Google Apps Script telah diperbarui dengan versi terbaru dan di-deploy sebagai Web App.',
+          'alert'
+        );
+      }
+    } catch (err: any) {
+      addNotification('Gagal Sinkronisasi', err?.message || 'Terjadi kesalahan saat sinkronisasi data.', 'alert');
+    } finally {
+      setIsPushingBiayaProses(false);
     }
   };
 
@@ -2096,6 +2132,8 @@ export default function App() {
             onPotongAtkPerkara={handlePotongAtkPerkara}
             onZeroOutCaseBalance={handleZeroOutCaseBalance}
             onSyncSpreadsheet={() => loadDataFromSource(true)}
+            onPushToCloud={handlePushBiayaProsesToCloud}
+            isPushingToCloud={isPushingBiayaProses}
             syncSettings={syncSettings}
             theme={theme}
             jurnalSkumRecords={jurnalSkumRecords}

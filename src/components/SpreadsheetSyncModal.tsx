@@ -229,20 +229,77 @@ function doGet(e) {
   var biayaProses = [];
   if (sheetBiaya) {
     var dataBiayaRows = sheetBiaya.getDataRange().getValues();
-    for (var m = 1; m < dataBiayaRows.length; m++) {
-      var b = dataBiayaRows[m];
-      if (b[0] && String(b[0]).trim() !== '') {
-        biayaProses.push({
-          id: String(b[0]),
-          tanggal: b[1] ? Utilities.formatDate(new Date(b[1]), Session.getScriptTimeZone(), 'yyyy-MM-dd') : '',
-          nomorPerkara: String(b[2] || '-'),
-          uraian: String(b[3] || ''),
-          penerimaan: Number(b[4]) || 0,
-          pengeluaran: Number(b[5]) || 0,
-          kategori: String(b[6] || 'Proses'),
-          keterangan: String(b[7] || ''),
-          createdAt: String(b[8] || '')
-        });
+    if (dataBiayaRows.length > 0) {
+      var bHeaders = dataBiayaRows[0].map(function(h) { return String(h || '').toLowerCase().trim(); });
+      var idIdx = -1, tglIdx = -1, noIdx = -1, urIdx = -1, penIdx = -1, pengIdx = -1, katIdx = -1, ketIdx = -1, crtIdx = -1;
+      for (var bh = 0; bh < bHeaders.length; bh++) {
+        var colH = bHeaders[bh];
+        if (colH === 'id') idIdx = bh;
+        else if (colH.indexOf('tanggal') !== -1 || colH === 'tgl') tglIdx = bh;
+        else if (colH.indexOf('nomor') !== -1 || colH.indexOf('perkara') !== -1 || colH === 'no') noIdx = bh;
+        else if (colH.indexOf('uraian') !== -1 || colH.indexOf('transaksi') !== -1 || colH.indexOf('nama') !== -1) urIdx = bh;
+        else if (colH.indexOf('penerimaan') !== -1 || colH.indexOf('debet') !== -1 || colH.indexOf('masuk') !== -1) penIdx = bh;
+        else if (colH.indexOf('pengeluaran') !== -1 || colH.indexOf('kredit') !== -1 || colH.indexOf('keluar') !== -1) pengIdx = bh;
+        else if (colH.indexOf('kategori') !== -1 || colH.indexOf('jenis') !== -1) katIdx = bh;
+        else if (colH.indexOf('keterangan') !== -1 || colH.indexOf('ket') !== -1 || colH.indexOf('catatan') !== -1) ketIdx = bh;
+        else if (colH.indexOf('created') !== -1 || colH.indexOf('updated') !== -1) crtIdx = bh;
+      }
+      
+      if (idIdx === -1 && bHeaders[0] === 'id') idIdx = 0;
+      if (tglIdx === -1) tglIdx = (idIdx !== -1) ? 1 : 0;
+      if (noIdx === -1) noIdx = (idIdx !== -1) ? 2 : 1;
+      if (urIdx === -1) urIdx = (idIdx !== -1) ? 3 : 2;
+      if (penIdx === -1) penIdx = (idIdx !== -1) ? 4 : 3;
+      if (pengIdx === -1) pengIdx = (idIdx !== -1) ? 5 : 4;
+      if (katIdx === -1) katIdx = (idIdx !== -1) ? 6 : 5;
+      if (ketIdx === -1) ketIdx = (idIdx !== -1) ? 7 : 6;
+      if (crtIdx === -1 && bHeaders.length > 8) crtIdx = 8;
+
+      for (var m = 1; m < dataBiayaRows.length; m++) {
+        var b = dataBiayaRows[m];
+        var rowHasData = (idIdx !== -1 && b[idIdx] && String(b[idIdx]).trim() !== '') ||
+                         (tglIdx !== -1 && b[tglIdx] && String(b[tglIdx]).trim() !== '') ||
+                         (urIdx !== -1 && b[urIdx] && String(b[urIdx]).trim() !== '') ||
+                         (penIdx !== -1 && Number(b[penIdx]) > 0) ||
+                         (pengIdx !== -1 && Number(b[pengIdx]) > 0);
+
+        if (rowHasData) {
+          var tglVal = '';
+          if (tglIdx !== -1 && b[tglIdx]) {
+            if (b[tglIdx] instanceof Date) {
+              tglVal = Utilities.formatDate(b[tglIdx], Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            } else {
+              var sTgl = String(b[tglIdx]).trim();
+              if (sTgl.indexOf('/') !== -1) {
+                var dParts = sTgl.split('/');
+                if (dParts.length === 3) {
+                  if (dParts[0].length === 4) {
+                    tglVal = dParts[0] + '-' + ('0' + dParts[1]).slice(-2) + '-' + ('0' + dParts[2]).slice(-2);
+                  } else {
+                    tglVal = dParts[2] + '-' + ('0' + dParts[1]).slice(-2) + '-' + ('0' + dParts[0]).slice(-2);
+                  }
+                } else {
+                  tglVal = sTgl;
+                }
+              } else {
+                tglVal = sTgl.split('T')[0];
+              }
+            }
+          }
+
+          var rowId = (idIdx !== -1 && b[idIdx] && String(b[idIdx]).trim() !== '') ? String(b[idIdx]).trim() : ('bp-row-' + m);
+          biayaProses.push({
+            id: rowId,
+            tanggal: tglVal,
+            nomorPerkara: (noIdx !== -1 && b[noIdx]) ? String(b[noIdx]).trim() : '-',
+            uraian: (urIdx !== -1 && b[urIdx]) ? String(b[urIdx]).trim() : '',
+            penerimaan: (penIdx !== -1) ? (Number(b[penIdx]) || 0) : 0,
+            pengeluaran: (pengIdx !== -1) ? (Number(b[pengIdx]) || 0) : 0,
+            kategori: (katIdx !== -1 && b[katIdx]) ? String(b[katIdx]).trim() : 'Proses',
+            keterangan: (ketIdx !== -1 && b[ketIdx]) ? String(b[ketIdx]).trim() : '',
+            createdAt: (crtIdx !== -1 && b[crtIdx]) ? String(b[crtIdx]).trim() : ''
+          });
+        }
       }
     }
   }
@@ -262,7 +319,7 @@ function doGet(e) {
           var nomorPerkaraVal = 'Kepaniteraan Umum';
           var ketVal = String(rowP[4] || '');
           var peminjamVal = String(rowP[2] || 'Kepaniteraan');
-          var matchPerk = (ketVal + ' ' + peminjamVal).match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
+          var matchPerk = (ketVal + ' ' + peminjamVal).match(/(?:Perkara\\s+)?(\\d+\\/Pdt\\.[A-Za-z]+\\/\\d{4}\\/PA\\.[A-Za-z]+)/i);
           if (matchPerk && matchPerk[1]) {
             nomorPerkaraVal = matchPerk[1];
           }
@@ -332,7 +389,7 @@ function doGet(e) {
         if (!alreadyInPinjam) {
           var noPerk = rJ.nomorPerkara || 'Kepaniteraan Umum';
           if (noPerk === 'Kepaniteraan Umum' || noPerk === '-') {
-            var mCase = (rJ.keterangan || rJ.uraian || '').match(/(?:Perkara\s+)?(\d+\/Pdt\.[G|P]\/\d{4}\/PA\.[A-Za-z]+)/i);
+            var mCase = (rJ.keterangan || rJ.uraian || '').match(/(?:Perkara\\s+)?(\\d+\\/Pdt\\.[A-Za-z]+\\/\\d{4}\\/PA\\.[A-Za-z]+)/i);
             if (mCase && mCase[1]) noPerk = mCase[1];
           }
           pinjamanSkum.push({
@@ -623,14 +680,39 @@ function doPost(e) {
       if (!sheet) {
         sheet = ss.insertSheet('BukuBiayaProses');
         sheet.appendRow(['ID', 'Tanggal', 'Nomor Perkara', 'Uraian', 'Penerimaan', 'Pengeluaran', 'Kategori', 'Keterangan', 'Created At']);
+        sheet.getRange('A1:I1').setFontWeight('bold').setBackground('#fef3c7');
       }
+
+      var tglStr = '';
+      if (record.tanggal instanceof Date) {
+        tglStr = Utilities.formatDate(record.tanggal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (record.tanggal) {
+        var sTgl = String(record.tanggal).trim();
+        if (sTgl.indexOf('/') !== -1) {
+          var dParts = sTgl.split('/');
+          if (dParts.length === 3) {
+            if (dParts[0].length === 4) {
+              tglStr = dParts[0] + '-' + ('0' + dParts[1]).slice(-2) + '-' + ('0' + dParts[2]).slice(-2);
+            } else {
+              tglStr = dParts[2] + '-' + ('0' + dParts[1]).slice(-2) + '-' + ('0' + dParts[0]).slice(-2);
+            }
+          } else {
+            tglStr = sTgl;
+          }
+        } else {
+          tglStr = sTgl.length >= 10 ? sTgl.substring(0, 10) : sTgl;
+        }
+      } else {
+        tglStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+
       var rowValues = [
         record.id || ('bp-' + Date.now()),
-        record.tanggal || '',
+        tglStr,
         record.nomorPerkara || '-',
         record.uraian || '',
-        Number(record.penerimaan) || 0,
-        Number(record.pengeluaran) || 0,
+        Number(record.penerimaan || record.debet || record.masuk) || 0,
+        Number(record.pengeluaran || record.kredit || record.keluar) || 0,
         record.kategori || 'Proses',
         record.keterangan || '',
         record.createdAt || new Date().toISOString()
@@ -675,6 +757,11 @@ function doPost(e) {
             break;
           }
         }
+      }
+    } else if (action === 'batch_biaya_proses' || action === 'batch_add_biaya_proses' || action === 'save_biaya_proses_all') {
+      var items = payload.items || payload.records || (Array.isArray(payload) ? payload : []);
+      if (Array.isArray(items) && items.length > 0) {
+        writeBiayaProsesToSheet(ss, items);
       }
     } else if (action === 'add_pinjaman_skum' || action === 'update_pinjaman_skum' || action === 'add_pinjaman_saldo' || action === 'update_pinjaman_saldo') {
       var sheet = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM');
@@ -921,20 +1008,60 @@ function writeCasesToSheet(ss, cases) {
 }
 
 function writeBiayaProsesToSheet(ss, records) {
-  var sheet = ss.getSheetByName('BukuBiayaProses') || ss.getSheetByName('LogTransaksi');
-  if (!sheet) return;
+  var sheet = ss.getSheetByName('BukuBiayaProses') || ss.getSheetByName('LogTransaksi') || ss.getSheetByName('BukuBantu');
+  if (!sheet) {
+    sheet = ss.insertSheet('BukuBiayaProses');
+  }
   sheet.clearContents();
   sheet.appendRow([
     'ID', 'Tanggal', 'Nomor Perkara', 'Uraian', 'Penerimaan',
     'Pengeluaran', 'Kategori', 'Keterangan', 'Created At'
   ]);
   sheet.getRange('A1:I1').setFontWeight('bold').setBackground('#fef3c7');
-  records.forEach(function(r) {
-    sheet.appendRow([
-      r.id, r.tanggal, r.nomorPerkara, r.uraian, r.penerimaan,
-      r.pengeluaran, r.kategori, r.keterangan, r.createdAt
+
+  if (!records || records.length === 0) return;
+
+  var newRows = [];
+  records.forEach(function(r, idx) {
+    var tglStr = '';
+    if (r.tanggal instanceof Date) {
+      tglStr = Utilities.formatDate(r.tanggal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    } else if (r.tanggal) {
+      var s = String(r.tanggal).trim();
+      if (s.indexOf('/') !== -1) {
+        var dParts = s.split('/');
+        if (dParts.length === 3) {
+          if (dParts[0].length === 4) {
+            tglStr = dParts[0] + '-' + ('0' + dParts[1]).slice(-2) + '-' + ('0' + dParts[2]).slice(-2);
+          } else {
+            tglStr = dParts[2] + '-' + ('0' + dParts[1]).slice(-2) + '-' + ('0' + dParts[0]).slice(-2);
+          }
+        } else {
+          tglStr = s;
+        }
+      } else {
+        tglStr = s.length >= 10 ? s.substring(0, 10) : s;
+      }
+    } else {
+      tglStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+
+    newRows.push([
+      r.id || ('bp-' + Date.now() + '-' + idx),
+      tglStr,
+      r.nomorPerkara || '-',
+      r.uraian || '',
+      Number(r.penerimaan || r.debet || r.masuk) || 0,
+      Number(r.pengeluaran || r.kredit || r.keluar) || 0,
+      r.kategori || 'Proses',
+      r.keterangan || '',
+      r.createdAt || new Date().toISOString()
     ]);
   });
+
+  if (newRows.length > 0) {
+    sheet.getRange(2, 1, newRows.length, 9).setValues(newRows);
+  }
 }
 
 function writeJurnalSkumToSheet(ss, records) {
@@ -1282,8 +1409,14 @@ function writeSimulasiAtkToSheet(ss, records) {
             </div>
 
             <p className={`text-xs ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-              Salin skrip di bawah ke Google Sheets Anda (<strong>Ekstensi &gt; Apps Script</strong>) lalu terbitkan sebagai Web App. Setiap kali ada perkara / transaksi baru, data akan langsung otomatis tercatat di baris spreadsheet Anda!
+              Salin skrip di bawah ke Google Sheets Anda (<strong>Ekstensi &gt; Apps Script</strong>) lalu terbitkan sebagai Web App. Setiap kali ada penambahan log transaksi manual, pemotongan ATK, atau perkara baru, data otomatis tercatat di baris Google Sheets Anda dan terbaca di perangkat lain!
             </p>
+
+            <div className={`p-2.5 rounded-lg border text-[11px] leading-relaxed ${
+              isLight ? 'bg-amber-50/70 border-amber-200 text-amber-900' : 'bg-amber-950/40 border-amber-800/60 text-amber-200'
+            }`}>
+              <strong>Penting untuk Sinkronisasi Antar Device:</strong> Jika sebelumnya skrip sudah terpasang, pastikan untuk menerapkan versi baru: Klik <strong>Terapkan (Deploy) &gt; Kelola penerapan (Manage deployments) &gt; Edit (ikon pensil) &gt; Versi: Versi Baru (New version) &gt; Terapkan</strong> agar pembaruan aksi <code>add_biaya_proses</code> aktif di server Google.
+            </div>
 
             <div className="relative">
               <pre className={`p-3 rounded-lg text-[11px] font-mono overflow-x-auto border max-h-36 ${
