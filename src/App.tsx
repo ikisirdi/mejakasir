@@ -10,13 +10,16 @@ import {
   PinjamanSkumRecord,
   StatusPerkara,
   SimulasiAtkRecord,
-  ActiveTabType
+  ActiveTabType,
+  AuthUser
 } from './types';
 import { StorageService, TARGET_APPS_SCRIPT_URL, TARGET_SPREADSHEET_URL } from './services/storage';
 import { SyncService } from './services/syncService';
 import { generateAtkSimulationDeterministic, migrateLegacySimulasiAtkRecords, mergeSimulasiAtkRecords } from './data/atkRubric';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
+import { LoginPage } from './components/LoginPage';
+import { AccountSettingsModal } from './components/AccountSettingsModal';
 import { CaseTable } from './components/CaseTable';
 import { BukuBiayaProses } from './components/BukuBiayaProses';
 import { BukuBantuAtk } from './components/BukuBantuAtk';
@@ -45,6 +48,41 @@ export default function App() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [syncSettings, setSyncSettings] = useState<SyncSettings>(StorageService.getSyncSettings());
   const [cacheMeta, setCacheMeta] = useState<CacheMetadata>(StorageService.getCacheMeta());
+
+  // Authentication State (Static user: idris, pwd: broken_dot)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => StorageService.getAuthUser());
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
+
+  const handleLoginSuccess = (user: AuthUser) => {
+    setCurrentUser(user);
+    setActiveToast({
+      id: Date.now().toString(),
+      title: 'Autentikasi Berhasil',
+      message: `Selamat datang, ${user.name} (${user.username}). Selamat bertugas di Sistem Informasi Perkara.`,
+      type: 'success',
+      timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      read: false
+    });
+  };
+
+  const handleLogout = () => {
+    StorageService.clearAuthUser();
+    setCurrentUser(null);
+  };
+
+  const handleCredentialsUpdated = (newUsername: string) => {
+    if (currentUser) {
+      setCurrentUser(prev => prev ? { ...prev, username: newUsername } : null);
+    }
+    setActiveToast({
+      id: Date.now().toString(),
+      title: 'Kredensial Diperbarui',
+      message: `Nama pengguna berhasil diperbarui menjadi "${newUsername}". Gunakan sandi baru pada login berikutnya.`,
+      type: 'success',
+      timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      read: false
+    });
+  };
 
   const handleToggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
@@ -2013,6 +2051,17 @@ export default function App() {
     return cases.reduce((acc, c) => acc + (Number(c.saldoPerkara) || 0), 0);
   }, [cases]);
 
+  // If user is not authenticated, display responsive login page
+  if (!currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={handleLoginSuccess}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+      />
+    );
+  }
+
   return (
     <div className={`min-h-screen font-sans flex flex-col transition-colors duration-200 ${
       isLight 
@@ -2043,6 +2092,9 @@ export default function App() {
         countKasKuning={countKasKuning}
         totalPerkara={cases.length}
         totalSaldoPerkara={totalSaldoPerkaraAll}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onOpenAccountSettings={() => setIsAccountModalOpen(true)}
       />
 
       {/* Main Workspace Layout (Sidebar + Scrollable Content) */}
@@ -2068,6 +2120,9 @@ export default function App() {
             setIsLaporanAtkModalOpen(true);
           }}
           theme={theme}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onOpenAccountSettings={() => setIsAccountModalOpen(true)}
         />
 
         {/* Scrollable View Area */}
@@ -2245,6 +2300,14 @@ export default function App() {
         selectedCase={jurnalSelectedCase}
         jurnalSkumRecords={jurnalSkumRecords}
         onExecuteJurnal={handleExecuteJurnal}
+        theme={theme}
+      />
+
+      <AccountSettingsModal
+        isOpen={isAccountModalOpen}
+        onClose={() => setIsAccountModalOpen(false)}
+        currentUser={currentUser}
+        onCredentialsUpdated={handleCredentialsUpdated}
         theme={theme}
       />
 

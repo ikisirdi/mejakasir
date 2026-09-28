@@ -9,9 +9,11 @@ import {
   Printer, 
   Database,
   X,
-  ExternalLink
+  ExternalLink,
+  LogOut,
+  KeyRound
 } from 'lucide-react';
-import { ActiveTabType, CacheMetadata } from '../types';
+import { ActiveTabType, CacheMetadata, AuthUser } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -29,6 +31,9 @@ interface SidebarProps {
   onOpenCacheModal: () => void;
   onOpenCetakLaporanAtk?: () => void;
   theme: 'light' | 'dark';
+  currentUser?: AuthUser | null;
+  onLogout?: () => void;
+  onOpenAccountSettings?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -46,7 +51,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSyncModal,
   onOpenCacheModal,
   onOpenCetakLaporanAtk,
-  theme
+  theme,
+  currentUser,
+  onLogout,
+  onOpenAccountSettings
 }) => {
   const isLight = theme === 'light';
 
@@ -326,21 +334,111 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         </div>
 
-        {/* Sidebar Footer: Summary Card when Expanded */}
+        {/* Sidebar Footer: Summary Card & User Info */}
         {!isCollapsed && (
-          <div className={`p-3 m-2.5 rounded-xl border ${
-            isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/60 border-slate-700'
-          }`}>
-            <div className="flex items-center justify-between text-[11px] mb-1">
-              <span className="text-slate-500 font-medium">Total Perkara</span>
-              <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{totalPerkara}</span>
+          <div className="p-2.5 space-y-2">
+            <div className={`p-2.5 rounded-xl border ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-800/60 border-slate-700'
+            }`}>
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-slate-500 font-medium">Total Perkara</span>
+                <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{totalPerkara}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-500 font-medium">Sisa Saldo</span>
+                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                  Rp {totalSaldoPerkara.toLocaleString('id-ID')}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-500 font-medium">Sisa Saldo</span>
-              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                Rp {totalSaldoPerkara.toLocaleString('id-ID')}
-              </span>
-            </div>
+
+            {currentUser && (
+              <div className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                isLight ? 'bg-white border-slate-200 shadow-2xs' : 'bg-slate-800 border-slate-700'
+              }`}>
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-xs">
+                    {currentUser.username.substring(0, 2).toUpperCase()}
+                  </div>
+                  <div className="truncate">
+                    <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                      {currentUser.username}
+                    </div>
+                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate">
+                      Petugas Aktif
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  {onOpenAccountSettings && (
+                    <button
+                      onClick={onOpenAccountSettings}
+                      className={`p-1.5 rounded-lg border transition-colors ${
+                        isLight 
+                          ? 'border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-emerald-600' 
+                          : 'border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-emerald-400'
+                      }`}
+                      title="Pengaturan Akun & Ubah Kata Sandi"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {onLogout && (
+                    <button
+                      onClick={onLogout}
+                      className={`p-1.5 rounded-lg border transition-colors ${
+                        isLight 
+                          ? 'border-rose-200 text-rose-600 hover:bg-rose-50' 
+                          : 'border-rose-900/50 text-rose-300 hover:bg-rose-950/60'
+                      }`}
+                      title="Keluar (Logout)"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isCollapsed && currentUser && (
+          <div className="p-2 border-t border-slate-200 dark:border-slate-800 flex flex-col items-center gap-1.5">
+            {onOpenAccountSettings && (
+              <button
+                onClick={onOpenAccountSettings}
+                className={`p-2 rounded-xl border transition-colors relative group ${
+                  isLight 
+                    ? 'border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-emerald-600' 
+                    : 'border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-emerald-400'
+                }`}
+                title="Pengaturan Akun & Ubah Sandi"
+              >
+                <KeyRound className="w-4 h-4" />
+                <div className="absolute left-full ml-2 px-2.5 py-1 bg-slate-900 text-white text-xs rounded-md shadow-md opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
+                  Pengaturan Akun ({currentUser.username})
+                </div>
+              </button>
+            )}
+
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className={`p-2 rounded-xl border transition-colors relative group ${
+                  isLight 
+                    ? 'border-rose-200 text-rose-600 hover:bg-rose-50' 
+                    : 'border-rose-900/50 text-rose-300 hover:bg-rose-950/60'
+                }`}
+                title="Keluar (Logout)"
+              >
+                <LogOut className="w-4 h-4" />
+                <div className="absolute left-full ml-2 px-2.5 py-1 bg-slate-900 text-white text-xs rounded-md shadow-md opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap">
+                  Keluar ({currentUser.username})
+                </div>
+              </button>
+            )}
           </div>
         )}
 

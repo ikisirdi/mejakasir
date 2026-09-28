@@ -155,3 +155,11 @@ export interface SimulasiAtkRecord {
 
 export type ActiveTabType = 'jurnal-skum' | 'buku-biaya-proses' | 'table' | 'kas-kuning' | 'simulasi-atk-ai';
 
+export interface AuthUser {
+  username: string;
+  name: string;
+  role: string;
+  institution: string;
+  loginTime: string;
+}
+

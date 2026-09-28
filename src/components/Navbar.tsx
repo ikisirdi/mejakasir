@@ -6,9 +6,12 @@ import {
   RefreshCw, 
   Sun,
   Moon,
-  Printer
+  Printer,
+  LogOut,
+  UserCheck,
+  KeyRound
 } from 'lucide-react';
-import { ActiveTabType } from '../types';
+import { ActiveTabType, AuthUser } from '../types';
 
 interface NavbarProps {
   onToggleSidebar: () => void;
@@ -26,6 +29,9 @@ interface NavbarProps {
   countKasKuning?: number;
   totalPerkara?: number;
   totalSaldoPerkara?: number;
+  currentUser?: AuthUser | null;
+  onLogout?: () => void;
+  onOpenAccountSettings?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -41,7 +47,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   theme,
   onToggleTheme,
   onOpenCetakLaporanAtk,
-  countKasKuning = 0
+  countKasKuning = 0,
+  currentUser,
+  onLogout,
+  onOpenAccountSettings
 }) => {
   const isLight = theme === 'light';
 
@@ -207,6 +216,68 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span className="hidden sm:inline">Input Perkara</span>
           <span className="sm:hidden">Input</span>
         </button>
+
+        {/* User Profile & Logout */}
+        {currentUser && (
+          <div className="flex items-center gap-1.5 pl-1 border-l border-slate-200 dark:border-slate-800 ml-0.5">
+            <button 
+              id="btn-navbar-account"
+              onClick={onOpenAccountSettings}
+              className={`hidden sm:flex items-center gap-2 px-2 py-1 rounded-xl border text-xs transition-colors hover:border-emerald-400 group ${
+                isLight 
+                  ? 'bg-slate-50 hover:bg-emerald-50/50 border-slate-200 text-slate-800' 
+                  : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200'
+              }`}
+              title={`Masuk sebagai: ${currentUser.name} (${currentUser.role}). Klik untuk ubah username / password.`}
+            >
+              <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-[11px] shadow-xs group-hover:scale-105 transition-transform">
+                {currentUser.username.substring(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden lg:block text-left leading-tight">
+                <div className="font-bold text-[11px] truncate max-w-[80px]">
+                  {currentUser.username}
+                </div>
+                <div className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold truncate max-w-[80px]">
+                  Petugas
+                </div>
+              </div>
+            </button>
+
+            {onOpenAccountSettings && (
+              <button
+                id="btn-navbar-change-pwd"
+                onClick={onOpenAccountSettings}
+                className={`p-2 rounded-xl border transition-colors flex items-center gap-1 text-xs font-semibold ${
+                  isLight
+                    ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700'
+                    : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-emerald-400'
+                }`}
+                title="Pengaturan Akun & Ubah Kata Sandi"
+                aria-label="Ubah Sandi"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span className="hidden 2xl:inline text-[11px]">Ubah Sandi</span>
+              </button>
+            )}
+
+            {onLogout && (
+              <button
+                id="btn-navbar-logout"
+                onClick={onLogout}
+                className={`p-2 rounded-xl border transition-all duration-150 flex items-center gap-1 text-xs font-semibold ${
+                  isLight
+                    ? 'border-rose-200 bg-rose-50/70 text-rose-600 hover:bg-rose-100 hover:border-rose-300'
+                    : 'border-rose-900/50 bg-rose-950/40 text-rose-300 hover:bg-rose-900/60 hover:border-rose-800'
+                }`}
+                title="Keluar dari Sistem (Logout)"
+                aria-label="Keluar dari Sistem"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden xl:inline text-[11px]">Keluar</span>
+              </button>
+            )}
+          </div>
+        )}
 
       </div>
 

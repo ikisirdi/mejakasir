@@ -1,4 +1,4 @@
-import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData, SimulasiAtkRecord } from '../types';
+import { CaseRecord, NotificationItem, SyncSettings, CacheMetadata, BiayaProsesRecord, JurnalBiayaSkumRecord, PinjamanSkumRecord, KasOpnameData, SimulasiAtkRecord, AuthUser } from '../types';
 import { INITIAL_CASE_RECORDS } from '../data/initialData';
 
 const STORAGE_KEYS = {
@@ -11,6 +11,16 @@ const STORAGE_KEYS = {
   PINJAMAN_SKUM: 'pa_perkara_pinjaman_skum_v1',
   KAS_OPNAME: 'pa_perkara_kas_opname_v1',
   SIMULASI_ATK: 'pa_perkara_simulasi_atk_v1',
+  AUTH_USER: 'pa_perkara_auth_user_v1',
+  AUTH_CREDENTIALS: 'pa_perkara_auth_credentials_v1',
+};
+
+export const STATIC_AUTH_CONFIG = {
+  STATIC_USERNAME: 'idris',
+  STATIC_PASSWORD: 'broken_dot',
+  DEFAULT_USER_NAME: 'Idris Albasyir',
+  DEFAULT_ROLE: 'Petugas Meja I & Administrator Kas Perkara',
+  INSTITUTION: 'Pengadilan Agama Paniai Kelas II',
 };
 
 export const INITIAL_BIAYA_PROSES_RECORDS: BiayaProsesRecord[] = [];
@@ -382,4 +392,86 @@ export class StorageService {
 
     return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   }
+
+  // --- Auth Session Management ---
+  static getAuthUser(): AuthUser | null {
+    try {
+      // Check localStorage first (remember me)
+      const localRaw = localStorage.getItem(STORAGE_KEYS.AUTH_USER);
+      if (localRaw) {
+        return JSON.parse(localRaw);
+      }
+      // Check sessionStorage (temporary session)
+      const sessionRaw = sessionStorage.getItem(STORAGE_KEYS.AUTH_USER);
+      if (sessionRaw) {
+        return JSON.parse(sessionRaw);
+      }
+    } catch (e) {
+      console.error('Error reading auth user from storage:', e);
+    }
+    return null;
+  }
+
+  static saveAuthUser(user: AuthUser, rememberMe: boolean = true): void {
+    try {
+      const userJson = JSON.stringify(user);
+      if (rememberMe) {
+        localStorage.setItem(STORAGE_KEYS.AUTH_USER, userJson);
+        sessionStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      } else {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH_USER, userJson);
+        localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      }
+    } catch (e) {
+      console.error('Error saving auth user:', e);
+    }
+  }
+
+  static clearAuthUser(): void {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+      sessionStorage.removeItem(STORAGE_KEYS.AUTH_USER);
+    } catch (e) {
+      console.error('Error clearing auth user:', e);
+    }
+  }
+
+  // --- Auth Credentials Management (Username & Password) ---
+  static getAuthCredentials(): { username: string; password: string } {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.AUTH_CREDENTIALS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.username && parsed.password) {
+          return { username: parsed.username, password: parsed.password };
+        }
+      }
+    } catch (e) {
+      console.error('Error reading auth credentials:', e);
+    }
+    return {
+      username: STATIC_AUTH_CONFIG.STATIC_USERNAME,
+      password: STATIC_AUTH_CONFIG.STATIC_PASSWORD
+    };
+  }
+
+  static saveAuthCredentials(username: string, password: string): void {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.AUTH_CREDENTIALS,
+        JSON.stringify({ username, password })
+      );
+    } catch (e) {
+      console.error('Error saving auth credentials:', e);
+    }
+  }
+
+  static resetAuthCredentials(): void {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_CREDENTIALS);
+    } catch (e) {
+      console.error('Error resetting auth credentials:', e);
+    }
+  }
 }
+
