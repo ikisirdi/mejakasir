@@ -260,6 +260,9 @@ function doGet(e) {
     }
   }
 
+  // Deduplicate biayaProses records so duplicate entries (like 730k Sisa Saldo ATK) are never returned to client
+  biayaProses = deduplicateBiayaProsesGs(biayaProses);
+
   // Fetch PinjamanSaldo / PinjamanSKUM
   var sheetPinjam = ss.getSheetByName('PinjamanSaldo') || ss.getSheetByName('PinjamanSKUM') || ss.getSheetByName('Pinjaman');
   var pinjamanSkum = [];
@@ -702,18 +705,69 @@ function doPost(e) {
       if (sheet) {
         var dataRows = sheet.getDataRange().getValues();
         var targetId = String(record.id || '').trim();
-        var targetNomor = String(record.nomorPerkara || '').trim().toLowerCase();
-        var targetUraian = String(record.uraian || '').trim().toLowerCase();
+        var targetNomor = cleanNormalizeTextGs(record.nomorPerkara || '');
+        var targetUraian = cleanNormalizeTextGs(record.uraian || '');
+        var targetPen = Number(record.penerimaan || record.debet || 0) || 0;
+        var targetPeng = Number(record.pengeluaran || record.kredit || 0) || 0;
+        var targetAmount = targetPen > 0 ? targetPen : targetPeng;
+        var is730Target = (targetPen === 730000 || targetPeng === 730000) && 
+          (targetUraian.indexOf('sisasaldoatk') !== -1 || targetUraian.indexOf('saldoatk2025') !== -1 || targetUraian.indexOf('atkth2025') !== -1);
+
         for (var m = 1; m < dataRows.length; m++) {
           var rowId = String(dataRows[m][0] || '').trim();
-          var rowNomor = String(dataRows[m][2] || '').trim().toLowerCase();
-          var rowUraian = String(dataRows[m][3] || '').trim().toLowerCase();
-          if ((targetId && rowId === targetId) || (targetNomor && rowNomor === targetNomor && rowUraian === targetUraian)) {
+          var rowNomor = cleanNormalizeTextGs(dataRows[m][2] || '');
+          var rowUraian = cleanNormalizeTextGs(dataRows[m][3] || '');
+          var rowPen = Number(dataRows[m][4]) || 0;
+          var rowPeng = Number(dataRows[m][5]) || 0;
+          var rowAmount = rowPen > 0 ? rowPen : rowPeng;
+
+          var isDeleted = false;
+          if (targetId && rowId === targetId) {
+            isDeleted = true;
+          } else if (is730Target && (rowPen === 730000 || rowPeng === 730000) && 
+                     (rowUraian.indexOf('sisasaldoatk') !== -1 || rowUraian.indexOf('saldoatk2025') !== -1 || rowUraian.indexOf('atkth2025') !== -1)) {
+            isDeleted = true;
+          } else if (targetNomor === rowNomor && targetUraian === rowUraian && targetAmount === rowAmount) {
+            isDeleted = true;
+          }
+
+          if (isDeleted) {
             sheet.deleteRow(m + 1);
             break;
           }
         }
       }
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Delete biaya proses success' })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'deduplicate_biaya_proses') {
+      var sheet = ss.getSheetByName('BukuBiayaProses') || ss.getSheetByName('LogTransaksi') || ss.getSheetByName('BukuBantu');
+      if (sheet) {
+        var existingList = [];
+        var dataBiayaRows = sheet.getDataRange().getValues();
+        for (var rIdx = 1; rIdx < dataBiayaRows.length; rIdx++) {
+          var rowB = dataBiayaRows[rIdx];
+          if (rowB[0] || rowB[1] || rowB[3]) {
+            existingList.push({
+              id: String(rowB[0] || ''),
+              tanggal: rowB[1],
+              nomorPerkara: String(rowB[2] || '-'),
+              uraian: String(rowB[3] || ''),
+              penerimaan: Number(rowB[4]) || 0,
+              pengeluaran: Number(rowB[5]) || 0,
+              kategori: String(rowB[6] || 'Proses'),
+              keterangan: String(rowB[7] || ''),
+              createdAt: String(rowB[8] || '')
+            });
+          }
+        }
+        var cleanedList = deduplicateBiayaProsesGs(existingList);
+        writeBiayaProsesToSheet(ss, cleanedList);
+        return ContentService.createTextOutput(JSON.stringify({
+          status: 'success',
+          removedCount: existingList.length - cleanedList.length,
+          totalRemaining: cleanedList.length
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'No sheet found' })).setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'batch_biaya_proses' || action === 'batch_add_biaya_proses' || action === 'save_biaya_proses_all') {
       var items = payload.items || payload.records || (Array.isArray(payload) ? payload : []);
       if (Array.isArray(items) && items.length > 0) {
@@ -963,6 +1017,76 @@ function writeCasesToSheet(ss, cases) {
   });
 }
 
+function cleanNormalizeTextGs(str) {
+  if (!str) return '';
+  return String(str)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function deduplicateBiayaProsesGs(records) {
+  if (!records || !records.length) return [];
+  var result = [];
+  var seenKeys = {};
+
+  for (var i = 0; i < records.length; i++) {
+    var r = records[i];
+    var pen = Number(r.penerimaan || r.debet || 0) || 0;
+    var peng = Number(r.pengeluaran || r.kredit || 0) || 0;
+    var amount = pen > 0 ? pen : (peng > 0 ? -peng : 0);
+    var tgl = String(r.tanggal || '').split('T')[0].trim();
+    var normNo = cleanNormalizeTextGs(r.nomorPerkara || '');
+    var normUr = cleanNormalizeTextGs(r.uraian || '');
+
+    // Special handling for 730000 Sisa Saldo ATK 2025
+    var is730SaldoAtk = (pen === 730000 || peng === 730000) && 
+      (normUr.indexOf('sisasaldoatk') !== -1 || normUr.indexOf('saldoatk2025') !== -1 || normUr.indexOf('atkth2025') !== -1);
+
+    var key;
+    if (is730SaldoAtk) {
+      key = 'sisa_saldo_atk_2025_730000';
+    } else if (normNo && normNo !== '-' && normNo !== 'kepaniteraanumum') {
+      key = 'case_' + normNo + '_' + amount + '_' + normUr;
+    } else {
+      key = 'general_' + tgl + '_' + amount + '_' + normUr;
+    }
+
+    if (!seenKeys[key]) {
+      seenKeys[key] = true;
+      result.push(r);
+    } else {
+      // Find existing item and preserve better metadata if needed
+      for (var k = 0; k < result.length; k++) {
+        var existing = result[k];
+        var exPen = Number(existing.penerimaan || existing.debet || 0) || 0;
+        var exPeng = Number(existing.pengeluaran || existing.kredit || 0) || 0;
+        var exAmount = exPen > 0 ? exPen : (exPeng > 0 ? -exPeng : 0);
+        var exNormUr = cleanNormalizeTextGs(existing.uraian || '');
+        var exNormNo = cleanNormalizeTextGs(existing.nomorPerkara || '');
+
+        var isMatch = false;
+        if (is730SaldoAtk && (exPen === 730000 || exPeng === 730000) && 
+            (exNormUr.indexOf('sisasaldoatk') !== -1 || exNormUr.indexOf('saldoatk2025') !== -1 || exNormUr.indexOf('atkth2025') !== -1)) {
+          isMatch = true;
+        } else if (exNormNo === normNo && exAmount === amount && exNormUr === normUr) {
+          isMatch = true;
+        }
+
+        if (isMatch) {
+          if (!existing.kategori || existing.kategori === 'Lainnya') {
+            if (r.kategori && r.kategori !== 'Lainnya') existing.kategori = r.kategori;
+          }
+          if ((!existing.keterangan || existing.keterangan === '-') && r.keterangan && r.keterangan !== '-') {
+            existing.keterangan = r.keterangan;
+          }
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 function writeBiayaProsesToSheet(ss, records) {
   var sheet = ss.getSheetByName('BukuBiayaProses') || ss.getSheetByName('LogTransaksi') || ss.getSheetByName('BukuBantu');
   if (!sheet) {
@@ -976,6 +1100,9 @@ function writeBiayaProsesToSheet(ss, records) {
   sheet.getRange('A1:I1').setFontWeight('bold').setBackground('#fef3c7');
 
   if (!records || records.length === 0) return;
+
+  // Deduplicate before writing to sheet to permanently prevent duplicate rows in Google Sheets
+  records = deduplicateBiayaProsesGs(records);
 
   var newRows = [];
   records.forEach(function(r, idx) {

@@ -286,13 +286,110 @@ export class SyncService {
       }
     }
 
-    result.sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
+    const dedupedResult = this.deduplicateBiayaProses(result);
+    dedupedResult.sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
 
     return {
-      reconciled: result,
+      reconciled: dedupedResult,
       addedCount: addedRecords.length,
       addedRecords
     };
+  }
+
+  /**
+   * Normalize text for fuzzy duplicate detection:
+   * Strips all whitespace, periods, hyphens, underscores, slashes, and lowercase.
+   * e.g. "Sisa Saldo ATK Th.2025" and "Sisa saldo ATK Th. 2025" -> "sisasaldoatkth2025"
+   */
+  static cleanNormalizeText(s: string): string {
+    return (s || '')
+      .toLowerCase()
+      .replace(/[\s\.\_\-\/\\\,]+/g, '')
+      .trim();
+  }
+
+  /**
+   * Intelligently deduplicate BiayaProsesRecord list.
+   * Eliminates duplicate records (such as duplicate Sisa Saldo ATK 2025 Rp 730.000)
+   * while keeping the highest fidelity metadata (category 'ATK', non-empty keterangan, stable ID).
+   */
+  static deduplicateBiayaProses(records: BiayaProsesRecord[]): BiayaProsesRecord[] {
+    if (!records || records.length <= 1) return records || [];
+
+    const deduped: BiayaProsesRecord[] = [];
+
+    for (const rec of records) {
+      if (!rec) continue;
+      const recDate = String(rec.tanggal || '').split('T')[0].trim();
+      const recNo = this.cleanNormalizeText(rec.nomorPerkara || '-');
+      const recUr = this.cleanNormalizeText(rec.uraian || '');
+      const recPen = Number(rec.penerimaan) || 0;
+      const recPeng = Number(rec.pengeluaran) || 0;
+
+      const dupIdx = deduped.findIndex(existing => {
+        // 1. Direct ID match
+        if (existing.id && rec.id && existing.id === rec.id) return true;
+
+        const exDate = String(existing.tanggal || '').split('T')[0].trim();
+        const exNo = this.cleanNormalizeText(existing.nomorPerkara || '-');
+        const exUr = this.cleanNormalizeText(existing.uraian || '');
+        const exPen = Number(existing.penerimaan) || 0;
+        const exPeng = Number(existing.pengeluaran) || 0;
+
+        // Financial amounts must match
+        if (recPen !== exPen || recPeng !== exPeng) return false;
+
+        // Case number must match
+        if (recNo !== exNo) return false;
+
+        // Date must match (or both empty)
+        if (recDate && exDate && recDate !== exDate) return false;
+
+        // Normalized description check:
+        // Exact normalized match, or one includes the other
+        if (recUr === exUr) return true;
+
+        if (recUr.length > 5 && exUr.length > 5) {
+          if (recUr.includes(exUr) || exUr.includes(recUr)) return true;
+        }
+
+        // Specific detection for Sisa Saldo ATK 2025 (amount 730000)
+        if ((recPen === 730000 || recPeng === 730000) &&
+            (recUr.includes('730') || recUr.includes('sisasaldo') || recUr.includes('atk2025') || recUr.includes('th2025')) &&
+            (exUr.includes('730') || exUr.includes('sisasaldo') || exUr.includes('atk2025') || exUr.includes('th2025'))) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (dupIdx === -1) {
+        deduped.push(rec);
+      } else {
+        // Merge best attributes: prefer 'ATK' over 'Lainnya', keep longer description & keterangan
+        const existing = deduped[dupIdx];
+        const preferredKat = (rec.kategori === 'ATK' || rec.kategori === 'Proses') 
+          ? rec.kategori 
+          : (existing.kategori || rec.kategori);
+
+        const preferredKet = (rec.keterangan && rec.keterangan.trim().length > (existing.keterangan || '').trim().length)
+          ? rec.keterangan
+          : existing.keterangan;
+
+        const preferredUr = (rec.uraian && rec.uraian.trim().length > (existing.uraian || '').trim().length)
+          ? rec.uraian
+          : existing.uraian;
+
+        deduped[dupIdx] = {
+          ...existing,
+          kategori: preferredKat,
+          keterangan: preferredKet,
+          uraian: preferredUr
+        };
+      }
+    }
+
+    return deduped;
   }
 
   /**
@@ -456,6 +553,7 @@ export class SyncService {
       return -1;
     };
 
+    const idIdx = getIdx('id');
     const tglIdx = getIdx('tanggal', 'tgl');
     const nomorIdx = getIdx('nomor perkara', 'nomor', 'no perkara', 'no');
     const uraianIdx = getIdx('uraian', 'rincian', 'transaksi');
@@ -463,6 +561,7 @@ export class SyncService {
     const pengeluaranIdx = getIdx('pengeluaran', 'keluar', 'kredit');
     const kategoriIdx = getIdx('kategori', 'jenis');
     const ketIdx = getIdx('keterangan', 'catatan');
+    const createdIdx = getIdx('created at', 'created');
 
     const cleanMoney = (val?: string): number => {
       if (!val) return 0;
@@ -484,6 +583,7 @@ export class SyncService {
       const pengeluaran = pengeluaranIdx !== -1 ? cleanMoney(cols[pengeluaranIdx]) : 0;
       const katRaw = kategoriIdx !== -1 ? cols[kategoriIdx] : 'ATK';
       const keterangan = ketIdx !== -1 && cols[ketIdx] ? cols[ketIdx] : '-';
+      const createdAt = createdIdx !== -1 && cols[createdIdx] ? cols[createdIdx] : new Date().toISOString();
 
       let kategori: 'ATK' | 'Proses' | 'Meterai' | 'Redaksi' | 'Panggilan' | 'Lainnya' = 'ATK';
       if (/proses/i.test(katRaw)) kategori = 'Proses';
@@ -492,8 +592,16 @@ export class SyncService {
       else if (/panggil/i.test(katRaw)) kategori = 'Panggilan';
       else if (/lain/i.test(katRaw)) kategori = 'Lainnya';
 
+      const existingId = (idIdx !== -1 && cols[idIdx] && cols[idIdx].trim().length > 0)
+        ? cols[idIdx].trim()
+        : '';
+
+      const cleanNo = nomorPerkara.replace(/[^a-zA-Z0-9]/g, '');
+      const cleanUr = this.cleanNormalizeText(uraian).slice(0, 15);
+      const rowId = existingId || `bp-row-${i}-${tanggal}-${cleanNo}-${cleanUr}-${penerimaan}-${pengeluaran}`;
+
       records.push({
-        id: `imported-bp-${Date.now()}-${i}`,
+        id: rowId,
         tanggal,
         nomorPerkara,
         uraian,
@@ -501,11 +609,11 @@ export class SyncService {
         pengeluaran,
         kategori,
         keterangan,
-        createdAt: new Date().toISOString()
+        createdAt
       });
     }
 
-    return records;
+    return this.deduplicateBiayaProses(records);
   }
 
   /**

@@ -249,22 +249,72 @@ export class StorageService {
     return [];
   }
 
-  static addDeletedBiayaProsesId(id: string): void {
+  static getDeletedBiayaProsesFingerprints(): string[] {
     try {
-      const list = this.getDeletedBiayaProsesIds();
-      if (!list.includes(id)) {
-        list.push(id);
-        localStorage.setItem('pa_perkara_deleted_bp_ids_v1', JSON.stringify(list));
+      const raw = localStorage.getItem('pa_perkara_deleted_bp_fps_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  }
+
+  static computeBiayaProsesFingerprint(r: Partial<BiayaProsesRecord>): string {
+    const tgl = String(r.tanggal || '').split('T')[0].trim();
+    const no = String(r.nomorPerkara || '-').toLowerCase().replace(/[\s\.\_\-\/]+/g, '');
+    const ur = String(r.uraian || '').toLowerCase().replace(/[\s\.\_\-\/\\\,]+/g, '');
+    const pen = Number(r.penerimaan) || 0;
+    const peng = Number(r.pengeluaran) || 0;
+    return `${tgl}|${no}|${ur}|${pen}|${peng}`;
+  }
+
+  static isDeletedBiayaProses(r: Partial<BiayaProsesRecord>): boolean {
+    if (!r) return false;
+    if (r.id) {
+      const deletedIds = this.getDeletedBiayaProsesIds();
+      if (deletedIds.includes(r.id)) return true;
+    }
+    const fp = this.computeBiayaProsesFingerprint(r);
+    const deletedFps = this.getDeletedBiayaProsesFingerprints();
+    return deletedFps.includes(fp);
+  }
+
+  static addDeletedBiayaProsesId(id: string, record?: Partial<BiayaProsesRecord>): void {
+    try {
+      if (id) {
+        const list = this.getDeletedBiayaProsesIds();
+        if (!list.includes(id)) {
+          list.push(id);
+          localStorage.setItem('pa_perkara_deleted_bp_ids_v1', JSON.stringify(list));
+        }
+      }
+      if (record) {
+        const fp = this.computeBiayaProsesFingerprint(record);
+        const fpList = this.getDeletedBiayaProsesFingerprints();
+        if (!fpList.includes(fp)) {
+          fpList.push(fp);
+          localStorage.setItem('pa_perkara_deleted_bp_fps_v1', JSON.stringify(fpList));
+        }
       }
     } catch (e) {
       // ignore
     }
   }
 
-  static removeDeletedBiayaProsesId(id: string): void {
+  static removeDeletedBiayaProsesId(id: string, record?: Partial<BiayaProsesRecord>): void {
     try {
-      const list = this.getDeletedBiayaProsesIds().filter(i => i !== id);
-      localStorage.setItem('pa_perkara_deleted_bp_ids_v1', JSON.stringify(list));
+      if (id) {
+        const list = this.getDeletedBiayaProsesIds().filter(i => i !== id);
+        localStorage.setItem('pa_perkara_deleted_bp_ids_v1', JSON.stringify(list));
+      }
+      if (record) {
+        const fp = this.computeBiayaProsesFingerprint(record);
+        const fpList = this.getDeletedBiayaProsesFingerprints().filter(f => f !== fp);
+        localStorage.setItem('pa_perkara_deleted_bp_fps_v1', JSON.stringify(fpList));
+      }
     } catch (e) {
       // ignore
     }

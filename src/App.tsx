@@ -510,7 +510,10 @@ export default function App() {
   const loadDataFromSource = useCallback(async (isForceSpreadsheetOverwrite = false) => {
     setIsRefreshing(true);
     const loadedCases = StorageService.getCases();
-    const loadedBiayaProses = StorageService.getBiayaProsesRecords();
+    const rawLoadedBiayaProses = StorageService.getBiayaProsesRecords();
+    const loadedBiayaProses = SyncService.deduplicateBiayaProses(
+      rawLoadedBiayaProses.filter(r => !StorageService.isDeletedBiayaProses(r))
+    );
     const loadedJurnalSkum = sanitizeSkumRecords(StorageService.getJurnalSkumRecords());
     const loadedPinjamanSkum = StorageService.getPinjamanSkumRecords();
     const loadedNotifs = StorageService.getNotifications();
@@ -536,8 +539,9 @@ export default function App() {
     const { updatedSimList: autoZeroedSimulasiAtk } = autoZeroOutPutusCases(syncedLoadedCases, migratedLoadedSimulasiAtk);
 
     setCases(syncedLoadedCases);
-    setBiayaProsesRecords(initialReconciledBp);
-    StorageService.saveBiayaProsesRecords(initialReconciledBp);
+    const cleanInitialBp = SyncService.deduplicateBiayaProses(initialReconciledBp);
+    setBiayaProsesRecords(cleanInitialBp);
+    StorageService.saveBiayaProsesRecords(cleanInitialBp);
     setJurnalSkumRecords(sortSkumRecords(initialSyncedJurnal));
     setPinjamanSkumRecords(initialSyncedPinjaman);
     setSimulasiAtkRecords(autoZeroedSimulasiAtk);
@@ -612,25 +616,26 @@ export default function App() {
         const deletedBpIds = new Set(StorageService.getDeletedBiayaProsesIds());
         const mergedBpMap = new Map<string, BiayaProsesRecord>();
 
-        // 1. Populate from remote sheet if available (excluding user-deleted ones)
+        // 1. Populate from remote sheet if available (excluding user-deleted ones and deduplicating)
         if (liveData.biayaProses && liveData.biayaProses.length > 0) {
-          for (const rem of liveData.biayaProses) {
-            if (!deletedBpIds.has(rem.id)) {
+          const cleanRemoteBp = SyncService.deduplicateBiayaProses(liveData.biayaProses);
+          for (const rem of cleanRemoteBp) {
+            if (!deletedBpIds.has(rem.id) && !StorageService.isDeletedBiayaProses(rem)) {
               mergedBpMap.set(rem.id, rem);
             }
           }
         }
 
         // 2. Merge local records:
-        // Include latestLocalBp, initialReconciledBp, and loadedBiayaProses
-        const localCandidates = [
+        // Include latestLocalBp, cleanInitialBp, and loadedBiayaProses
+        const localCandidates = SyncService.deduplicateBiayaProses([
           ...loadedBiayaProses,
-          ...initialReconciledBp,
+          ...cleanInitialBp,
           ...latestLocalBp
-        ];
+        ]);
 
         for (const loc of localCandidates) {
-          if (deletedBpIds.has(loc.id)) continue;
+          if (deletedBpIds.has(loc.id) || StorageService.isDeletedBiayaProses(loc)) continue;
 
           if (mergedBpMap.has(loc.id)) {
             // Keep local copy if it has more recent timestamp or edits
@@ -641,27 +646,48 @@ export default function App() {
               mergedBpMap.set(loc.id, { ...existing, ...loc });
             }
           } else {
-            // Check if there is an exact matching record under a different ID to avoid duplicate display
-            const isDuplicate = Array.from(mergedBpMap.values()).some(r =>
-              (r.nomorPerkara || '').trim().toLowerCase() === (loc.nomorPerkara || '').trim().toLowerCase() &&
-              r.tanggal === loc.tanggal &&
-              (r.uraian || '').trim().toLowerCase() === (loc.uraian || '').trim().toLowerCase() &&
-              Number(r.penerimaan || 0) === Number(loc.penerimaan || 0) &&
-              Number(r.pengeluaran || 0) === Number(loc.pengeluaran || 0)
-            );
+            // Fuzzy normalized matching to prevent duplicate rows (like Th.2025 vs Th. 2025 for Rp 730.000)
+            const locNo = SyncService.cleanNormalizeText(loc.nomorPerkara || '-');
+            const locUr = SyncService.cleanNormalizeText(loc.uraian || '');
+            const locDate = (loc.tanggal || '').split('T')[0];
+            const locPen = Number(loc.penerimaan || 0);
+            const locPeng = Number(loc.pengeluaran || 0);
+
+            const isDuplicate = Array.from(mergedBpMap.values()).some(r => {
+              if (Number(r.penerimaan || 0) !== locPen || Number(r.pengeluaran || 0) !== locPeng) return false;
+              if ((r.tanggal || '').split('T')[0] !== locDate) return false;
+              const rNo = SyncService.cleanNormalizeText(r.nomorPerkara || '-');
+              if (rNo !== locNo) return false;
+              const rUr = SyncService.cleanNormalizeText(r.uraian || '');
+              if (rUr === locUr) return true;
+              if (rUr.length > 5 && locUr.length > 5 && (rUr.includes(locUr) || locUr.includes(rUr))) return true;
+              if ((locPen === 730000 || locPeng === 730000) &&
+                  (rUr.includes('730') || rUr.includes('sisasaldo') || rUr.includes('atk2025') || rUr.includes('th2025')) &&
+                  (locUr.includes('730') || locUr.includes('sisasaldo') || locUr.includes('atk2025') || locUr.includes('th2025'))) {
+                return true;
+              }
+              return false;
+            });
+
             if (!isDuplicate) {
               mergedBpMap.set(loc.id, loc);
             }
           }
         }
 
-        const effectiveBiayaList = Array.from(mergedBpMap.values()).sort(
+        const effectiveBiayaList = SyncService.deduplicateBiayaProses(
+          Array.from(mergedBpMap.values())
+        ).sort(
           (a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime()
         );
 
-        const { reconciled: finalReconciledBp, addedRecords: newBpFromSkum } = SyncService.reconcileBiayaProsesWithSkum(
+        const { reconciled: rawReconciledBp, addedRecords: newBpFromSkum } = SyncService.reconcileBiayaProsesWithSkum(
           effectiveBiayaList,
           activeJurnal
+        );
+
+        const finalReconciledBp = SyncService.deduplicateBiayaProses(
+          rawReconciledBp.filter(r => !StorageService.isDeletedBiayaProses(r))
         );
 
         setBiayaProsesRecords(finalReconciledBp);
@@ -890,26 +916,33 @@ export default function App() {
         addNotification('Gagal Menghapus Transaksi', 'Data log transaksi tidak ditemukan.', 'alert');
         return;
       }
-      StorageService.addDeletedBiayaProsesId(id);
 
-      setBiayaProsesRecords(prev => {
-        const map = new Map<string, BiayaProsesRecord>();
-        stored.forEach(r => map.set(r.id, r));
-        prev.forEach(r => map.set(r.id, r));
-        map.delete(id);
-        const updated = Array.from(map.values());
-        StorageService.saveBiayaProsesRecords(updated);
-        return updated;
-      });
+      // Record deletion by both ID and normalized content fingerprint so it never resurrects on refresh
+      StorageService.addDeletedBiayaProsesId(id, target);
+
+      const map = new Map<string, BiayaProsesRecord>();
+      stored.forEach(r => map.set(r.id, r));
+      biayaProsesRecords.forEach(r => map.set(r.id, r));
+      map.delete(id);
+
+      const updated = SyncService.deduplicateBiayaProses(
+        Array.from(map.values()).filter(r => r.id !== id && !StorageService.isDeletedBiayaProses(r))
+      );
+
+      setBiayaProsesRecords(updated);
+      StorageService.saveBiayaProsesRecords(updated);
 
       const webhook = getWebhookUrl(syncSettings);
       if (webhook) {
         SyncService.postToWebhook(webhook, 'delete_biaya_proses', target);
+        // Also push the sanitized deduplicated records to Google Sheets
+        // to immediately remove the deleted row from remote spreadsheet
+        SyncService.pushBiayaProsesToCloud(webhook, updated);
       }
 
       addNotification(
         'Log Transaksi Berhasil Dihapus',
-        `Satu log transaksi (${target.uraian}) telah berhasil dihapus.`,
+        `Satu log transaksi (${target.uraian}) telah berhasil dihapus dan disinkronkan.`,
         'warning',
         target.nomorPerkara !== '-' ? target.nomorPerkara : undefined
       );
@@ -917,6 +950,35 @@ export default function App() {
       addNotification('Gagal Menghapus Transaksi', err?.message || 'Terjadi kesalahan saat menghapus log transaksi.', 'alert');
     }
   };
+
+  const handleDeduplicateBiayaProsesRecords = useCallback(() => {
+    const stored = StorageService.getBiayaProsesRecords();
+    const source = stored.length > 0 ? stored : biayaProsesRecords;
+    const deduped = SyncService.deduplicateBiayaProses(source);
+    const diffCount = source.length - deduped.length;
+
+    setBiayaProsesRecords(deduped);
+    StorageService.saveBiayaProsesRecords(deduped);
+
+    const webhook = getWebhookUrl(syncSettings);
+    if (webhook) {
+      SyncService.pushBiayaProsesToCloud(webhook, deduped);
+    }
+
+    if (diffCount > 0) {
+      addNotification(
+        'Pembersihan Data Ganda Berhasil',
+        `Sebanyak ${diffCount} data transaksi ganda di Buku Bantu Biaya Proses berhasil dibersihkan dan disinkronkan ke Google Sheets.`,
+        'success'
+      );
+    } else {
+      addNotification(
+        'Data Sudah Rapi',
+        'Tidak ditemukan adanya data transaksi ganda di Buku Bantu Biaya Proses.',
+        'info'
+      );
+    }
+  }, [biayaProsesRecords, syncSettings]);
 
   const handlePotongAtkPerkara = (nomorPerkara: string, amount: number, uraian: string, tanggal: string) => {
     const newRecord: BiayaProsesRecord = {
@@ -2193,6 +2255,7 @@ export default function App() {
             theme={theme}
             jurnalSkumRecords={jurnalSkumRecords}
             onReconcileFromSkum={handleReconcileBiayaProsesFromSkum}
+            onDeduplicate={handleDeduplicateBiayaProsesRecords}
           />
         ) : (
           <CaseTable

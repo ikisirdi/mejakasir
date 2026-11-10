@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { BiayaProsesRecord, CaseRecord, JurnalBiayaSkumRecord, SyncSettings } from '../types';
+import { SyncService } from '../services/syncService';
 import { Lipa7aReportModal } from './Lipa7aReportModal';
 import { CetakBukuBiayaModal } from './CetakBukuBiayaModal';
 import { 
@@ -46,6 +47,7 @@ interface BukuBiayaProsesProps {
   theme?: 'light' | 'dark';
   jurnalSkumRecords?: JurnalBiayaSkumRecord[];
   onReconcileFromSkum?: () => void;
+  onDeduplicate?: () => void;
 }
 
 export const MONTH_NAMES = [
@@ -84,9 +86,17 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
   syncSettings,
   theme = 'light',
   jurnalSkumRecords = [],
-  onReconcileFromSkum
+  onReconcileFromSkum,
+  onDeduplicate
 }) => {
   const isLight = theme === 'light';
+
+  // Deduplicate records dynamically to prevent duplicate entries (such as duplicate Rp 730.000 Sisa Saldo ATK) from ever rendering
+  const cleanRecords = useMemo(() => {
+    return SyncService.deduplicateBiayaProses(records);
+  }, [records]);
+
+  const hasDuplicateRecords = records.length > cleanRecords.length;
 
   // Dynamic Current Month & Year
   const currentMonthIdx = new Date().getMonth();
@@ -186,7 +196,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
 
     let runningCumulative = 0;
     return months.map(m => {
-      const monthRecords = records.filter(r => {
+      const monthRecords = cleanRecords.filter(r => {
         if (!r.tanggal) return false;
         const [yr, mo] = r.tanggal.split('-');
         if (selectedYear !== 'ALL' && yr !== selectedYear) return false;
@@ -209,7 +219,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
         records: monthRecords
       };
     });
-  }, [records, selectedYear]);
+  }, [cleanRecords, selectedYear]);
 
   // Form states for ATK deduction
   const [atkCaseNumber, setAtkCaseNumber] = useState<string>(cases[0]?.nomorPerkara || '');
@@ -328,7 +338,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
     return atkItems.filter(skum => {
       const normSkumNo = (skum.nomorPerkara || '').trim().toLowerCase().replace(/\s+/g, '');
       const skumAmount = Number(skum.pengeluaran) || 0;
-      const hasMatch = records.some(b => {
+      const hasMatch = cleanRecords.some(b => {
         const normBpNo = (b.nomorPerkara || '').trim().toLowerCase().replace(/\s+/g, '');
         if (normBpNo !== normSkumNo) return false;
         if (b.id === `bp-atk-${skum.id}` || b.id === skum.id || b.id.includes(skum.id)) return true;
@@ -340,13 +350,13 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
       });
       return !hasMatch;
     });
-  }, [jurnalSkumRecords, records]);
+  }, [jurnalSkumRecords, cleanRecords]);
 
   // Filter records by Month & Year & Search
   const filteredRecords = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
 
-    return records.filter(item => {
+    return cleanRecords.filter(item => {
       const [yr, mo] = item.tanggal.split('-');
       const monthIdx = parseInt(mo, 10) - 1;
       const monthName = MONTH_NAMES[monthIdx];
@@ -365,7 +375,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
 
       return true;
     }).sort((a, b) => new Date(a.tanggal).getTime() - new Date(b.tanggal).getTime());
-  }, [records, selectedMonth, selectedYear, searchQuery]);
+  }, [cleanRecords, selectedMonth, selectedYear, searchQuery]);
 
   // Summaries
   const totalPenerimaan = useMemo(() => {
@@ -380,19 +390,19 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
 
   // Check whether there is ATK income entering Buku Bantu for the selected month/period
   const hasAtkIncomeForMonth = useMemo(() => {
-    const activeRecords = selectedMonth === 'ALL' ? records : filteredRecords;
+    const activeRecords = selectedMonth === 'ALL' ? cleanRecords : filteredRecords;
     return activeRecords.some(r => (r.penerimaan || 0) > 0);
-  }, [records, filteredRecords, selectedMonth]);
+  }, [cleanRecords, filteredRecords, selectedMonth]);
 
   // Cumulative all-time balance up to selected month
-  const totalAllTimePenerimaan = useMemo(() => records.reduce((s, r) => s + (r.penerimaan || 0), 0), [records]);
-  const totalAllTimePengeluaran = useMemo(() => records.reduce((s, r) => s + (r.pengeluaran || 0), 0), [records]);
+  const totalAllTimePenerimaan = useMemo(() => cleanRecords.reduce((s, r) => s + (r.penerimaan || 0), 0), [cleanRecords]);
+  const totalAllTimePengeluaran = useMemo(() => cleanRecords.reduce((s, r) => s + (r.pengeluaran || 0), 0), [cleanRecords]);
   const saldoAkumulasi = totalAllTimePenerimaan - totalAllTimePengeluaran;
 
   // Calculate ATK process balance per case number (Nomor Perkara)
   const atkBalanceByCase = useMemo(() => {
     const map: Record<string, { penerimaan: number; pengeluaran: number; saldo: number }> = {};
-    records.forEach(r => {
+    cleanRecords.forEach(r => {
       const no = (r.nomorPerkara || '').trim();
       if (!no || no === '-') return;
       if (!map[no]) {
@@ -403,7 +413,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
       map[no].saldo = map[no].penerimaan - map[no].pengeluaran;
     });
     return map;
-  }, [records]);
+  }, [cleanRecords]);
 
   const formatRupiah = (amount: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -612,6 +622,30 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
             >
               <RefreshCw className="w-4 h-4 text-emerald-600" />
               <span>Muat dari Spreadsheet</span>
+            </button>
+          )}
+
+          {/* Deduplicate Button */}
+          {onDeduplicate && (
+            <button
+              id="deduplicate-biaya-proses-btn"
+              onClick={onDeduplicate}
+              className={`flex items-center space-x-1.5 px-3 py-2 border rounded-xl text-xs font-bold transition-all shadow-xs ${
+                hasDuplicateRecords
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-500 shadow-md ring-2 ring-rose-400 animate-pulse'
+                  : isLight
+                    ? 'bg-purple-50 hover:bg-purple-100 text-purple-800 border-purple-200'
+                    : 'bg-slate-800 hover:bg-slate-700 text-purple-400 border-purple-800/60'
+              }`}
+              title="Bersihkan baris transaksi yang terduplikasi secara otomatis dan sinkronkan ke Google Sheets"
+            >
+              <Scissors className="w-4 h-4" />
+              <span>Bersihkan Data Ganda</span>
+              {hasDuplicateRecords && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white text-rose-700 font-extrabold">
+                  {records.length - cleanRecords.length}
+                </span>
+              )}
             </button>
           )}
 
@@ -1828,7 +1862,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
         isOpen={isPrintModalOpen}
         onClose={() => setIsPrintModalOpen(false)}
         initialType={printModalReportType}
-        records={records}
+        records={cleanRecords}
         cases={cases}
         jurnalSkumRecords={jurnalSkumRecords}
         selectedMonthDefault={selectedMonth}
@@ -2225,7 +2259,7 @@ export const BukuBiayaProses: React.FC<BukuBiayaProsesProps> = ({
       <Lipa7aReportModal
         isOpen={isLipa7aOpen}
         onClose={() => setIsLipa7aOpen(false)}
-        biayaProsesRecords={records}
+        biayaProsesRecords={cleanRecords}
         cases={cases}
         theme={theme}
       />
